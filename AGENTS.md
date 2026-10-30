@@ -34,8 +34,8 @@
 ## Communication and delivery
 
 - Keep user-facing answers and project documents clean, concise, and easy to scan. Lead with the result or decision; prefer short paragraphs, useful headings, and compact bullets. Avoid long blocks of text, repeated explanations, and details that do not help the user act or review. Keep necessary technical information, but put deep reference material in the relevant document instead of repeating it in every update.
-- All project documentation must contain both English and Chinese versions in the same file, with the complete English version first and the complete Chinese version after it. Keep the two versions aligned. Do not deliver a single-language-only document. When updating documentation, update both language sections in the same task.
-- End every project document with a **Project Owner Judgment Questions** section in English and its matching **项目负责人判断题** section in Chinese. Put these after all other content in their respective language sections. If no decision is pending, state that explicitly in both languages; do not omit the sections.
+- All project documentation must contain English, Chinese, and Korean versions in the same file, in that order: the complete English version first, then the complete Chinese version, then the complete Korean version. Keep the three versions aligned. Do not deliver a document that is missing any of the three languages. When updating documentation, update all three language sections in the same task.
+- End every project document with a **Project Owner Judgment Questions** section in English, its matching **项目负责人判断题** section in Chinese, and its matching **프로젝트 책임자 판단 질문** section in Korean. Put these after all other content in their respective language sections. If no decision is pending, state that explicitly in all three languages; do not omit the sections.
 - Explain meaningful changes in terms of user behavior and the relevant acceptance check.
 - Update `design.md` when agreed scope, architecture, API contracts, or milestone status changes.
 - Keep documentation consistent with implemented behavior; call out any known gap explicitly.
@@ -83,8 +83,8 @@ No pending project-owner decisions for this guidance document.
 ## 沟通与交付
 
 - 面向用户的回答和项目文档要干净、简洁、便于快速浏览。先说结果或决定；优先使用短段落、有用的小标题和精简列表。避免大段文字、重复解释和不利于用户执行或审查的细节。保留必要的技术信息；深入的参考材料放在对应文档中，不要在每次进度说明里重复。
-- 所有项目文档都必须在同一个文件中包含完整英文版和中文版：英文在前，中文在后。两种语言的内容必须保持一致。不要只交付单一语言版本。更新文档时，必须在同一任务中同步更新两个语言部分。
-- 每份项目文档的结尾都必须包含英文 **Project Owner Judgment Questions** 部分，以及内容对应的中文 **项目负责人判断题** 部分。这两个部分必须分别位于各自语言内容的末尾，并且之后不能再有其他内容。如果当前没有待决定事项，也要用中英文明确写明；不能省略这两个部分。
+- 所有项目文档都必须在同一个文件中包含完整的英文版、中文版和韩文版，顺序为：英文在前，中文其次，韩文最后。三种语言的内容必须保持一致。不要交付缺少任一语言的文档。更新文档时，必须在同一任务中同步更新三个语言部分。
+- 每份项目文档的结尾都必须包含英文 **Project Owner Judgment Questions** 部分、内容对应的中文 **项目负责人判断题** 部分，以及内容对应的韩文 **프로젝트 책임자 판단 질문** 部分。这些部分必须分别位于各自语言内容的末尾，并且之后不能再有其他内容。如果当前没有待决定事项，也要用三种语言明确写明；不能省略这些部分。
 - 说明重要改动时，联系到用户行为和相关验收标准。
 - 已确认的范围、架构、API 合约或里程碑状态发生变化时，更新 `design.md`。
 - 确保文档与实际行为一致；明确说明已知差距。
@@ -94,3 +94,51 @@ No pending project-owner decisions for this guidance document.
 
 本指南目前没有待项目负责人判断的事项。
 
+---
+
+# AI 영어 말하기 표현 코치 프로젝트 가이드
+
+## 제품 방향
+
+- 제품 동작이나 아키텍처를 바꾸기 전에 `design.md`를 읽습니다.
+- `idea.md`는 현재 구현 범위가 아니라 원래의 넓은 비전과 면접 질문 모음으로 취급합니다.
+- `design.md`는 합의된 제품 범위, Agent 동작, 시스템 설계, API 형태, 검수 기준, 면접 근거의 유일한 기준으로 취급합니다.
+- `Goal.md`는 일정, 하위 목표, 의존 관계, 진행 상황, 전달 체크포인트를 다루는 실행 로드맵으로만 취급합니다. `design.md`의 시스템 설계 설명을 `Goal.md`에 복사하지 말고, 필요하면 `design.md`를 참조합니다.
+- 현재 최소 Demo는 `translation_agent_demo/`에서만 작업합니다. 검색, 외부 도구, Agent 프레임워크 없이 LLM으로 사용자가 입력한 텍스트를 영어로 번역합니다. 이는 작업 경계와 보안 동작을 검증하기 위한 좁은 범위의 프로토타입이며, `design.md`의 표현 검색 프로젝트 범위를 슬그머니 대체하지 않습니다.
+- 이 프로젝트는 구어 영어 표현을 더 빨리 떠올려야 하는 IELTS 7점 안팎의 학습자를 위한 구직용 포트폴리오 프로젝트입니다. 3주 핵심은 완전한 앱이 아니라 Agent/API입니다.
+- 첫 제품 흐름은 다음과 같습니다: 중국어로 쓴 생각(선택적 맥락) → 선별된 표현 라이브러리 검색 → 의미와 사용 맥락이 포함된 관련 영어 표현 반환 → 선택적으로 저장.
+- 첫 릴리스는 표현 검색, 계정, 저장된 표현, 유용한 학습 기록에 집중합니다.
+- 명확한 제품 요구가 있고 `design.md`의 합의가 업데이트되기 전에는 음성, 발음 채점, 범용 튜터링 채팅, 멀티 에이전트 오케스트레이션, 관련 없는 인프라를 추가하지 않습니다.
+
+## 작업 분할
+
+- 구현 전에 큰 요청을 의존 관계와 검수 기준이 명확한 작은 작업으로 나눕니다. `Goal.md`의 로드맵을 사용하고, 작업이 진행 중일 때는 그곳의 작업 상태를 최신으로 유지합니다.
+- 한 번에 하나의 검토 가능한 제품 슬라이스를 우선합니다. 관련 없는 마일스톤을 하나의 변경에 합치지 않습니다.
+- 여러 구성 요소가 제품 결정, API 계약, 데이터 소유 규칙에 의존하기 전에 먼저 문서화합니다.
+- 설계 결정이 정해지지 않았으면 되돌릴 수 있는 최소한의 기본값을 사용하고 `design.md`에 기록합니다. 그 결정이 제품 범위, 사용자 데이터, 비용, 플랫폼을 크게 바꾸는 경우에는 사용자에게 묻습니다.
+
+## 엔지니어링 원칙
+
+- 검색 결과는 저장되어 있고 출처를 추적할 수 있는 표현 레코드에 근거해야 합니다. 향후 생성된 제안을 추가한다면 검색된 레코드와 명확히 구분합니다.
+- API 경계에서 외부 입력을 검증하고, 타입이 정의된 요청/응답 모델을 사용하며, 요청당 재시도 횟수와 작업량을 제한합니다.
+- 번역 Demo에서는 제출된 텍스트를 번역 데이터로만 취급합니다. 텍스트는 별도의 user 메시지 경계 안에 두고, 모델에 도구를 제공하지 않으며, 검증된 번역 필드만 반환합니다.
+- 현재 학습자 신원은 검증된 인증에서 가져옵니다. 접근 제어에 클라이언트가 보낸 사용자 ID를 절대 신뢰하지 않습니다.
+- 저장된 표현과 검색 기록에는 사용자별 접근 제어를 적용합니다. 한 학습자의 데이터를 다른 학습자에게 노출하지 않습니다.
+- 가능하면 제공자별 인증, 임베딩, 호스팅 세부 사항을 작은 인터페이스 뒤에 둡니다.
+- 의도한 엔지니어링 역량을 보여 주는 가장 단순한 아키텍처를 우선합니다. 큐, 캐시, 에이전트, 추가 서비스는 측정된 필요가 있을 때만 추가합니다.
+- 학습 콘텐츠의 출처와 라이선스 메타데이터를 보존합니다.
+- 필요하고 보존 기간이 정해진 경우가 아니라면 비밀 정보, 인증 토큰, 학습자 콘텐츠를 로그에 남기지 않습니다.
+
+## 소통과 전달
+
+- 사용자에게 보이는 답변과 프로젝트 문서는 깔끔하고 간결하며 훑어보기 쉽게 작성합니다. 결과나 결정을 먼저 말하고, 짧은 문단, 유용한 소제목, 간결한 목록을 우선합니다. 긴 텍스트 덩어리, 반복 설명, 사용자의 실행이나 검토에 도움이 되지 않는 세부 사항은 피합니다. 필요한 기술 정보는 유지하되, 깊은 참고 자료는 매 업데이트마다 반복하지 말고 관련 문서에 둡니다.
+- 모든 프로젝트 문서는 같은 파일 안에 영어, 중국어, 한국어 버전을 모두 포함해야 합니다. 완전한 영어 버전을 먼저, 완전한 중국어 버전을 그다음에, 완전한 한국어 버전을 마지막에 둡니다. 세 버전의 내용을 일치시킵니다. 세 언어 중 하나라도 빠진 문서는 전달하지 않습니다. 문서를 업데이트할 때는 같은 작업에서 세 언어 섹션을 모두 업데이트합니다.
+- 모든 프로젝트 문서는 영어 **Project Owner Judgment Questions** 섹션, 그에 대응하는 중국어 **项目负责人判断题** 섹션, 한국어 **프로젝트 책임자 판단 질문** 섹션으로 끝나야 합니다. 이 섹션들은 각 언어 섹션에서 다른 모든 내용 뒤에 둡니다. 결정할 사항이 없으면 세 언어 모두에서 그렇다고 명시하고, 섹션을 생략하지 않습니다.
+- 의미 있는 변경은 사용자 동작과 관련 검수 기준의 관점에서 설명합니다.
+- 합의된 범위, 아키텍처, API 계약, 마일스톤 상태가 바뀌면 `design.md`를 업데이트합니다.
+- 문서를 구현된 동작과 일치시키고, 알려진 차이는 명시적으로 밝힙니다.
+- 명시된 검수 기준을 충족하지 않았다면 작업이 완료되었다고 주장하지 않습니다.
+
+## 프로젝트 책임자 판단 질문
+
+이 가이드 문서에는 현재 프로젝트 책임자가 결정할 사항이 없습니다.

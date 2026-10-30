@@ -1,6 +1,6 @@
 # Translation Agent Demo
 
-> Minimal, modular LLM-only translation prototype. English first; Chinese follows.
+> Minimal, modular LLM-only translation prototype. English first; Chinese and Korean follow.
 
 ## What it does
 
@@ -43,7 +43,7 @@ Prompt and schema constraints reduce task drift, and the application exposes no 
 
 # 翻译 Agent Demo
 
-> 仅使用 LLM 的模块化翻译原型。英文版在前，中文版在后。
+> 仅使用 LLM 的模块化翻译原型。英文版在前，其后依次为中文版和韩文版。
 
 ## 功能
 
@@ -81,3 +81,46 @@ Prompt and schema constraints reduce task drift, and the application exposes no 
 
 1. 首次运行想使用哪个模型供应商和模型名称？
 2. 该供应商是否支持 OpenAI-compatible Chat Completions 路由和 JSON 响应模式？
+
+---
+
+# 번역 Agent Demo
+
+> LLM만 사용하는 최소한의 모듈형 번역 프로토타입. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다.
+
+## 기능
+
+텍스트를 받아 영어 번역만 반환합니다. 입력이 질문이어도 번역할 질문으로 취급합니다: `今天天气如何？`는 `What's the weather like today?`를 반환하며, 프로그램은 날씨를 조회하거나 답하지 않습니다.
+
+모델에는 어떤 도구도 제공되지 않습니다. 사용자 텍스트는 JSON으로 인코딩된 별도의 user 메시지로 전송되며 번역할 내용으로 취급됩니다. 모델 응답은 `translation` 필드만 포함한 JSON 객체여야 하며, 애플리케이션은 그 구조를 검증한 뒤에 번역을 출력합니다.
+
+## 모듈
+
+- `config.py` — 환경 변수와 `.env` 설정
+- `guardrails.py` — 입력 제한과 응답 스키마 검증
+- `prompts.py` — 번역만 수행하는 시스템 지시
+- `providers/protocol.py` — 교체 가능한 모델 인터페이스
+- `providers/openai_compatible.py` — Python 표준 라이브러리 기반 HTTP 어댑터
+- `service.py` — 번역 흐름 오케스트레이션
+- `cli.py` — 명령줄 진입점
+
+## 실행
+
+1. Python 3.10 이상을 사용합니다.
+2. 이 폴더에서 `.env.example`을 `.env`로 복사하고 모델 제공자 URL, 키, 모델 이름을 설정합니다.
+3. 상위 `Agent_Development` 디렉터리에서 다음을 실행합니다.
+
+   ```powershell
+   python -m translation_agent_demo "今天天气如何？"
+   ```
+
+설정한 엔드포인트는 OpenAI 호환 `/chat/completions` 경로와 JSON 응답 모드를 지원해야 합니다. Python 서드파티 패키지나 Agent 프레임워크는 필요하지 않습니다.
+
+## 한계
+
+프롬프트와 응답 스키마 제약은 작업 이탈을 줄이며, 애플리케이션은 모델에 도구나 부작용이 있는 작업을 노출하지 않습니다. 그래도 LLM은 잘못된 번역을 반환하거나 지시를 따르지 않을 수 있습니다. 이 프로토타입은 적대적인 모델 동작에 대해 형식적인 보장을 주장하지 않습니다.
+
+## 프로젝트 책임자 판단 질문
+
+1. 첫 실행에 어떤 모델 제공자와 모델 이름을 사용할까요?
+2. 그 제공자는 OpenAI 호환 Chat Completions 경로와 JSON 응답 모드를 지원합니까?
