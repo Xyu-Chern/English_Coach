@@ -17,10 +17,14 @@ from psycopg import Connection, Error as PsycopgError
 
 from ..config import _read_env_file
 from ..providers.podcast_index import PodcastIndexClient, PodcastIndexCredentials, PodcastIndexError
+from ..providers.changelog_transcripts import (
+    CHANGELOG_FEED_ID, ChangelogTranscriptCatalogError, published_episode_numbers,
+)
 from ..providers.podcast_transcripts import (
     PodcastTranscriptError,
     _select_transcript,
     fetch_episode_transcript,
+    select_corpus_transcript,
 )
 from ..storage.corpus import has_transcript, save_transcript
 from ..storage.podcast_sync import (
@@ -36,6 +40,7 @@ from ..storage.podcast_sync import (
     schedule_feed,
 )
 from ..storage.postgres import CorpusStorageError, PostgresSettings, connect_database
+from ..storage.source_reviews import approved_feed_ids, transcript_url_is_approved
 
 MAX_FEEDS = 30
 INITIAL_TRANSCRIPT_TARGET = 100  # Unique episodes, not transcript body versions.
@@ -88,7 +93,12 @@ class SyncSettings:
 class SyncResult:
     status: Literal["ok", "idle", "failed", "partial_failure", "already_running", "disabled"] = "ok"
     feed_id: int | None = None
+    eligible_feeds: int = 0
+    skipped_unapproved_feeds: int = 0
+    idle_reason: Literal["unapproved_feeds", "not_due", "approval_withdrawn"] | None = None
     api_calls: int = 0
+    catalog_calls: int = 0
+    catalog_failures: int = 0
     episodes_seen: int = 0
     skipped_unusable_metadata: int = 0
     skipped_existing: int = 0
@@ -114,9 +124,11 @@ def _validate_feed_ids(feed_ids: tuple[int, ...]) -> None:
         raise SyncConfigurationError(f"Provide 1–{MAX_FEEDS} distinct positive integer feed IDs.")
 
 
-def _episode_snapshot(episode: dict[str, Any]) -> dict[str, Any]:
+def _episode_snapshot(
+    episode: dict[str, Any], *, published_changelog_episodes: frozenset[int] | None = None,
+) -> dict[str, Any]:
     """Keep only the selected transcript and fields needed to save its provenance."""
-    url, declared_type = _select_transcript(episode, 0)
+    url, declared_type = select_corpus_transcript(episode, published_changelog_episodes=published_changelog_episodes)
     if not 1 <= len(url) <= 2048:
         raise ValueError("Invalid selected transcript URL length.")
     for key in ("id", "feedId"):
@@ -145,11 +157,14 @@ def _episode_snapshot(episode: dict[str, Any]) -> dict[str, Any]:
 
 
 def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int, ...]) -> SyncResult:
-    """Resume the least recently visited due feed from the explicit subscriptions.
+    """Resume one due feed from the explicitly reviewed configured subscriptions.
 
-    At most one metadata request and ten sequential publisher downloads occur.
+    At most one Podcast Index request and ten publisher downloads occur. Changelog
+    additionally reads one public repository directory at metadata refresh time.
     Metadata is cached across ticks. Claims and attempts are committed before HTTP;
     a session lock prevents overlap without holding a transaction during HTTP.
+    Every next HTTP request checks feed approval again; an already in-flight
+    request cannot be cancelled. Storage separately rechecks before inheritance.
     """
     _validate_feed_ids(feed_ids)
     if not conn.autocommit:
@@ -161,10 +176,19 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
     result = SyncResult()
     started_at = time.monotonic()
     try:
-        ensure_feeds(conn, feed_ids)
-        state = claim_next_feed(conn, feed_ids, interval_seconds=TICK_SECONDS)
+        eligible = approved_feed_ids(conn, feed_ids)
+        result.eligible_feeds = len(eligible)
+        result.skipped_unapproved_feeds = len(feed_ids) - len(eligible)
+        if not eligible:
+            result.status = "idle"
+            result.idle_reason = "unapproved_feeds"
+            return result
+        ensure_feeds(conn, eligible)
+        state = claim_next_feed(conn, eligible, interval_seconds=TICK_SECONDS)
         if state is None:
-            return SyncResult(status="idle")  # No due work means no external requests.
+            result.status = "idle"
+            result.idle_reason = "not_due"
+            return result
         feed_id = state.feed_id
         result.feed_id = feed_id
         result.stored_episodes = count_stored_episodes(conn, feed_id)
@@ -176,6 +200,10 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
 
         now = datetime.now(timezone.utc)
         if not state.initial_scan_done or (state.backfill_complete and state.next_refresh_at <= now):
+            if not approved_feed_ids(conn, (feed_id,)):
+                result.status = "idle"
+                result.idle_reason = "approval_withdrawn"
+                return result
             # Revisit seven days so captions attached after episode publication can appear.
             # This is a bounded window, not a guarantee of finding every historical change.
             since = None
@@ -190,11 +218,20 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
                 delay = AUTH_COOLDOWN_SECONDS if exc.status_code in {401, 403} else RETRY_SECONDS
                 defer_all_feeds(conn, seconds=max(delay, exc.retry_after_seconds or 0))
                 return result  # Persist provider-wide cooldown across cron/container restarts.
+            published = None
+            if feed_id == CHANGELOG_FEED_ID:
+                result.catalog_calls = 1
+                try:
+                    published = published_episode_numbers()
+                except ChangelogTranscriptCatalogError:
+                    result.status, result.catalog_failures = "failed", 1
+                    schedule_feed(conn, feed_id, now + timedelta(seconds=RETRY_SECONDS))
+                    return result
             snapshots = []
             for episode in payload["items"]:
                 result.episodes_seen += 1
                 try:
-                    snapshots.append(_episode_snapshot(episode))
+                    snapshots.append(_episode_snapshot(episode, published_changelog_episodes=published))
                 except (PodcastTranscriptError, ValueError, UnicodeError):
                     result.skipped_unusable_metadata += 1
             cache_episodes(conn, feed_id, snapshots, refresh_seconds=REFRESH_SECONDS)
@@ -207,11 +244,19 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
                 break
             if not state.backfill_complete and result.stored_episodes >= INITIAL_TRANSCRIPT_TARGET:
                 break
+            if not approved_feed_ids(conn, (feed_id,)):
+                result.status = "idle"
+                result.idle_reason = "approval_withdrawn"
+                return result
             item = claim_next_item(conn, feed_id, retry_seconds=RETRY_SECONDS)
             if item is None:
                 break
             episode = item.episode_data
             url, _ = _select_transcript(episode, 0)
+            if not transcript_url_is_approved(conn, feed_id, url):
+                result.skipped_unusable_metadata += 1
+                finish_item(conn, feed_id, item.episode_id, success=False, retry_seconds=86400)
+                continue  # Old cached references cannot widen the reviewed source scope.
             if has_transcript(conn, feed_id, item.episode_id, url):
                 finish_item(conn, feed_id, item.episode_id, success=True)
                 result.skipped_existing += 1

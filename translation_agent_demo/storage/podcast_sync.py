@@ -186,8 +186,10 @@ def cache_episodes(
 ) -> None:
     """Persist up to 200 selected references and the completed metadata refresh.
 
-    An unchanged URL retains its status/retry count. A changed URL gets a fresh
-    bounded attempt budget. The caller supplies transcript-bearing episodes only.
+    An unchanged URL retains its status/retry count until its failed-attempt
+    cooldown expires. A later bounded metadata refresh may then retry it, so
+    delayed transcripts are not abandoned permanently. A changed URL gets a
+    fresh attempt budget. The caller supplies selected transcript references.
     Existing source display metadata is refreshed without changing rights or bodies.
     """
     _identity(feed_id)
@@ -206,10 +208,13 @@ def cache_episodes(
                     transcript_url = EXCLUDED.transcript_url,
                     episode_data = EXCLUDED.episode_data,
                     status = CASE WHEN podcast_sync_items.transcript_url <> EXCLUDED.transcript_url
+                        OR (podcast_sync_items.status = 'failed' AND podcast_sync_items.next_attempt_at <= now())
                         THEN 'pending' ELSE podcast_sync_items.status END,
                     attempts = CASE WHEN podcast_sync_items.transcript_url <> EXCLUDED.transcript_url
+                        OR (podcast_sync_items.status = 'failed' AND podcast_sync_items.next_attempt_at <= now())
                         THEN 0 ELSE podcast_sync_items.attempts END,
                     next_attempt_at = CASE WHEN podcast_sync_items.transcript_url <> EXCLUDED.transcript_url
+                        OR (podcast_sync_items.status = 'failed' AND podcast_sync_items.next_attempt_at <= now())
                         THEN now() ELSE podcast_sync_items.next_attempt_at END
                 """,
                 [(feed_id, item["id"], item["transcripts"][0]["url"], Jsonb(item)) for item in snapshots],
@@ -250,7 +255,8 @@ def claim_next_item(
         with conn.transaction(), conn.cursor(row_factory=dict_row) as cursor:
             # A process can stop after recording its third attempt but before finish_item.
             cursor.execute(
-                "UPDATE public.podcast_sync_items SET status = 'failed' "
+                "UPDATE public.podcast_sync_items SET status = 'failed', "
+                "next_attempt_at = GREATEST(next_attempt_at, now() + interval '1 day') "
                 "WHERE feed_id = %s AND status = 'pending' AND attempts >= 3",
                 (feed_id,),
             )
@@ -282,7 +288,7 @@ def finish_item(
     conn: psycopg.Connection, feed_id: int, episode_id: int,
     *, success: bool, retry_seconds: int = 900,
 ) -> None:
-    """Finish an attempted item; failures stop permanently after three attempts."""
+    """After three failures, wait at least a day and require fresh bounded metadata."""
     _identity(feed_id)
     _identity(episode_id)
     _seconds(retry_seconds)
@@ -293,10 +299,11 @@ def finish_item(
             """
             UPDATE public.podcast_sync_items
             SET status = CASE WHEN %s THEN 'stored' WHEN attempts >= 3 THEN 'failed' ELSE 'pending' END,
-                next_attempt_at = now() + %s * interval '1 second'
+                next_attempt_at = now() + CASE WHEN NOT %s AND attempts >= 3
+                    THEN GREATEST(%s, 86400) ELSE %s END * interval '1 second'
             WHERE feed_id = %s AND episode_id = %s
             """,
-            (success, retry_seconds, feed_id, episode_id),
+            (success, success, retry_seconds, retry_seconds, feed_id, episode_id),
         )
     except psycopg.Error:
         raise CorpusStorageError("Could not finish the podcast episode attempt.") from None
