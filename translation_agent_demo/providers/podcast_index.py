@@ -1,7 +1,7 @@
 """Small, read-only Podcast Index adapter; independent of the translation model.
 
-Each method makes one request for at most ten records. There is deliberately no
-pagination, retry loop, feed traversal, transcript download, or index crawler.
+Each method makes one bounded request: up to ten search results or 200 episodes
+from a selected feed. There is no pagination, retry loop, or index crawler.
 """
 
 import hashlib
@@ -9,7 +9,10 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from http.client import HTTPException
+from math import ceil
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,12 +23,43 @@ from ..config import _read_env_file
 
 BASE_URL = "https://api.podcastindex.org/api/1.0"  # Send credentials only to this API.
 MAX_RESULTS = 10  # Local exploration limit, not the upstream API's maximum.
+MAX_EPISODE_RESULTS = 200  # A bounded page from one explicitly selected feed.
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # Bound memory used by an external response.
 TIMEOUT_SECONDS = 15  # Timeout for blocking network operations; not an overall deadline.
 
 
 class PodcastIndexError(Exception):
     """A safe error message with no credentials or upstream response body."""
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
+def parse_retry_after_seconds(value: str | None) -> int | None:
+    """Read a bounded Retry-After delay/date; do not sleep or retry here."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        return None
+    value = value.strip()
+    if not value or any(ord(char) < 32 or ord(char) > 126 for char in value):
+        return None
+    if value.isdecimal():
+        if len(value) > 10:  # Do not parse arbitrarily large upstream integers.
+            return None
+        seconds = int(value)
+    else:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)  # HTTP dates use GMT.
+            seconds = max(0, ceil(retry_at.timestamp() - time.time()))
+        except (ValueError, TypeError, IndexError, OverflowError, OSError):
+            return None
+    return seconds if 0 <= seconds <= 2**31 - 1 else None
 
 
 @dataclass(frozen=True)
@@ -79,17 +113,24 @@ class PodcastIndexClient:
         self._validate_limit(limit)
         return self._get("/search/byterm", {"q": query.strip(), "max": limit}, "feeds")
 
-    def episodes_by_feed_id(self, feed_id: int, *, limit: int = 5) -> dict[str, Any]:
-        """Fetch a bounded episode sample from one explicitly selected feed."""
+    def episodes_by_feed_id(
+        self, feed_id: int, *, limit: int = 5, since: int | None = None,
+    ) -> dict[str, Any]:
+        """Fetch one bounded episode page, optionally filtered by Unix epoch seconds."""
         if type(feed_id) is not int or feed_id <= 0:
             raise ValueError("feed_id must be one positive integer.")
-        self._validate_limit(limit)
-        return self._get("/episodes/byfeedid", {"id": feed_id, "max": limit}, "items")
+        self._validate_limit(limit, maximum=MAX_EPISODE_RESULTS)
+        if since is not None and (type(since) is not int or since < 0):
+            raise ValueError("since must be a nonnegative integer Unix timestamp or None.")
+        params = {"id": feed_id, "max": limit}
+        if since is not None:
+            params["since"] = since
+        return self._get("/episodes/byfeedid", params, "items")
 
     @staticmethod
-    def _validate_limit(limit: int) -> None:
-        if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
-            raise ValueError(f"limit must be an integer from 1 to {MAX_RESULTS}.")
+    def _validate_limit(limit: int, *, maximum: int = MAX_RESULTS) -> None:
+        if type(limit) is not int or not 1 <= limit <= maximum:
+            raise ValueError(f"limit must be an integer from 1 to {maximum}.")
 
     def _get(self, endpoint: str, params: dict[str, str | int], records_key: str) -> dict[str, Any]:
         timestamp = str(int(time.time()))  # UTC Unix seconds, generated for each request.
@@ -113,8 +154,12 @@ class PodcastIndexClient:
         except HTTPError as exc:
             # No retry, including 401/403/429; don't expose upstream text or request headers.
             code = exc.code
+            retry_after = parse_retry_after_seconds((exc.headers or {}).get("Retry-After"))
             exc.close()
-            raise PodcastIndexError(f"Podcast Index returned HTTP {code}; no retry was made.") from None
+            raise PodcastIndexError(
+                f"Podcast Index returned HTTP {code}; no retry was made.",
+                status_code=code, retry_after_seconds=retry_after,
+            ) from None
         except (URLError, OSError, HTTPException):
             raise PodcastIndexError("Could not read the Podcast Index response; no retry was made.") from None
         if len(raw) > MAX_RESPONSE_BYTES:

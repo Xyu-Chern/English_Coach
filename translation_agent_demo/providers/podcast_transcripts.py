@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener
 
-from .podcast_index import _NoRedirect
+from .podcast_index import _NoRedirect, parse_retry_after_seconds
 
 MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024
 TIMEOUT_SECONDS = 15  # Per blocking network operation, not an overall deadline.
@@ -21,6 +21,14 @@ TIMEOUT_SECONDS = 15  # Per blocking network operation, not an overall deadline.
 
 class PodcastTranscriptError(Exception):
     """An acquisition failure without credentials or upstream body in its message."""
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True)
@@ -120,7 +128,11 @@ def _download_transcript(url: str) -> tuple[str, str | None]:
         })  # Publisher requests never contain Podcast Index authentication headers.
         with build_opener(_NoRedirect()).open(request, timeout=TIMEOUT_SECONDS) as response:
             if response.status != 200:
-                raise PodcastTranscriptError("Transcript server did not return a complete HTTP 200 response.")
+                raise PodcastTranscriptError(
+                    "Transcript server did not return a complete HTTP 200 response.",
+                    status_code=response.status,
+                    retry_after_seconds=parse_retry_after_seconds(response.headers.get("Retry-After")),
+                )
             if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
                 raise PodcastTranscriptError("Compressed transcript responses are unsupported.")
             content_type = response.headers.get("Content-Type")
@@ -134,8 +146,12 @@ def _download_transcript(url: str) -> tuple[str, str | None]:
             raw = response.read(MAX_TRANSCRIPT_BYTES + 1)  # One extra byte detects overflow.
     except HTTPError as exc:
         code = exc.code
+        retry_after = parse_retry_after_seconds((exc.headers or {}).get("Retry-After"))
         exc.close()
-        raise PodcastTranscriptError(f"Transcript server returned HTTP {code}; no retry was made.") from None
+        raise PodcastTranscriptError(
+            f"Transcript server returned HTTP {code}; no retry was made.",
+            status_code=code, retry_after_seconds=retry_after,
+        ) from None
     except (URLError, OSError, HTTPException):
         raise PodcastTranscriptError("Could not read the transcript response; no retry was made.") from None
     except ValueError:
