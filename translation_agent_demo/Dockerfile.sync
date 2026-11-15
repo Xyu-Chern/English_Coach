@@ -1,0 +1,20 @@
+FROM python:3.13-alpine3.23
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    TZ=UTC
+
+WORKDIR /app
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements.txt
+
+# Copy the package explicitly; credentials and downloaded transcripts stay on the host.
+COPY *.py /app/translation_agent_demo/
+COPY providers/ /app/translation_agent_demo/providers/
+COPY storage/ /app/translation_agent_demo/storage/
+COPY jobs/ /app/translation_agent_demo/jobs/
+COPY --chmod=0600 docker/podcast-sync.crontab /etc/crontabs/root
+
+# Alpine provides BusyBox crond. The schedule, not container startup, starts API work.
+CMD ["crond", "-f", "-l", "8", "-L", "/dev/stdout"]

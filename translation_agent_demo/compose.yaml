@@ -1,0 +1,64 @@
+name: english-coach
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: english_coach
+      POSTGRES_USER: english_coach
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in translation_agent_demo/.env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # The official entrypoint runs these only when the data volume is empty.
+      - type: bind
+        source: ./storage/migrations/001_transcripts.sql
+        target: /docker-entrypoint-initdb.d/001_transcripts.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./storage/migrations/002_podcast_sync.sql
+        target: /docker-entrypoint-initdb.d/002_podcast_sync.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./docker/010_seed_transcript.sql
+        target: /docker-entrypoint-initdb.d/010_seed_transcript.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      # Local inspection material is optional and is never baked into an image.
+      - ./.local/transcripts:/bootstrap:ro
+    healthcheck:
+      # TCP is available after the entrypoint's temporary initialization server exits.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "english_coach", "-d", "english_coach"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  podcast-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.sync
+    environment:
+      # libpq reads PGPASSWORD without interpolating special characters into a URI.
+      DATABASE_URL: postgresql://english_coach@postgres:5432/english_coach
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in translation_agent_demo/.env}
+      PODCAST_INDEX_API_KEY: ${PODCAST_INDEX_API_KEY:-}
+      PODCAST_INDEX_API_SECRET: ${PODCAST_INDEX_API_SECRET:-}
+      PODCAST_SYNC_ENABLED: ${PODCAST_SYNC_ENABLED:-true}
+      PODCAST_SYNC_FEED_IDS: ${PODCAST_SYNC_FEED_IDS:-920666}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
