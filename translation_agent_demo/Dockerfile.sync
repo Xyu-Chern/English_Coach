@@ -3,15 +3,19 @@ FROM python:3.13-alpine3.23
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
     TZ=UTC
 
 WORKDIR /app
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements.txt
+# Cache the public tokenizer vocabulary at build time; corpus jobs run locally.
+RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 # Copy the package explicitly; credentials and downloaded transcripts stay on the host.
 COPY *.py /app/translation_agent_demo/
 COPY providers/ /app/translation_agent_demo/providers/
+COPY corpus/ /app/translation_agent_demo/corpus/
 COPY storage/ /app/translation_agent_demo/storage/
 COPY jobs/ /app/translation_agent_demo/jobs/
 COPY --chmod=0600 docker/podcast-sync.crontab /etc/crontabs/root

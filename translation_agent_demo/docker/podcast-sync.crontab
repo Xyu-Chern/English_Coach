@@ -1,3 +1,5 @@
 # Wake every 3 minutes (UTC); the worker selects one subscribed feed per run.
 # Stop stalled HTTP work before the next tick; PostgreSQL retains unfinished attempts.
 */3 * * * * timeout -k 10 170 /usr/local/bin/python -m translation_agent_demo.jobs.podcast_sync >> /proc/1/fd/1 2>> /proc/1/fd/2
+# Process acquired text one minute after each collection tick, in an independent job.
+1-59/3 * * * * timeout -k 10 170 /usr/local/bin/python -m translation_agent_demo.jobs.corpus_build >> /proc/1/fd/1 2>> /proc/1/fd/2
