@@ -25,6 +25,12 @@ services:
         bind:
           create_host_path: false
       - type: bind
+        source: ./storage/migrations/003_corpus_chunks.sql
+        target: /docker-entrypoint-initdb.d/003_corpus_chunks.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ./docker/010_seed_transcript.sql
         target: /docker-entrypoint-initdb.d/010_seed_transcript.sql
         read_only: true

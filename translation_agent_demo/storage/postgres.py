@@ -103,7 +103,7 @@ def check_database(conn: psycopg.Connection) -> DatabaseInfo:
 
 
 def initialize_schema(conn: psycopg.Connection) -> None:
-    """Explicitly apply both initial migrations to a fresh DB with a setup account.
+    """Explicitly apply initial migrations to a fresh DB with a setup account.
 
     Docker applies the same files through its standard initialization directory.
     Each file owns BEGIN/COMMIT, so use an idle autocommit connection here.
@@ -114,7 +114,7 @@ def initialize_schema(conn: psycopg.Connection) -> None:
         directory = Path(__file__).parent / "migrations"
         migrations = [
             (directory / name).read_text(encoding="utf-8")
-            for name in ("001_transcripts.sql", "002_podcast_sync.sql")
+            for name in ("001_transcripts.sql", "002_podcast_sync.sql", "003_corpus_chunks.sql")
         ]
         for sql in migrations:
             conn.execute(sql, prepare=False)
