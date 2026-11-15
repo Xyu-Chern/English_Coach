@@ -3,3 +3,5 @@
 */3 * * * * timeout -k 10 170 /usr/local/bin/python -m translation_agent_demo.jobs.podcast_sync >> /proc/1/fd/1 2>> /proc/1/fd/2
 # Process acquired text one minute after each collection tick, in an independent job.
 1-59/3 * * * * timeout -k 10 170 /usr/local/bin/python -m translation_agent_demo.jobs.corpus_build >> /proc/1/fd/1 2>> /proc/1/fd/2
+# One paid batch per tick when CORPUS_EMBED_ENABLED=true; missing vectors resume later.
+2-59/3 * * * * timeout -k 10 170 /usr/local/bin/python -m translation_agent_demo.jobs.corpus_embed >> /proc/1/fd/1 2>> /proc/1/fd/2

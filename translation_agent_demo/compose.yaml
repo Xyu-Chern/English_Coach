@@ -31,12 +31,48 @@ services:
         bind:
           create_host_path: false
       - type: bind
+        source: ./storage/migrations/004_corpus_embeddings.sql
+        target: /docker-entrypoint-initdb.d/004_corpus_embeddings.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./storage/migrations/005_podcast_feed_reviews.sql
+        target: /docker-entrypoint-initdb.d/005_podcast_feed_reviews.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./storage/migrations/006_corpus_observations.sql
+        target: /docker-entrypoint-initdb.d/006_corpus_observations.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./storage/migrations/007_corpus_markdown.sql
+        target: /docker-entrypoint-initdb.d/007_corpus_markdown.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./storage/migrations/008_transcript_review_scope.sql
+        target: /docker-entrypoint-initdb.d/008_transcript_review_scope.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ./docker/010_seed_transcript.sql
         target: /docker-entrypoint-initdb.d/010_seed_transcript.sql
         read_only: true
         bind:
           create_host_path: false
       # Local inspection material is optional and is never baked into an image.
+      - type: bind
+        source: ./docker/011_changelog_review.sql
+        target: /docker-entrypoint-initdb.d/011_changelog_review.sql
+        read_only: true
+        bind:
+          create_host_path: false
       - ./.local/transcripts:/bootstrap:ro
     healthcheck:
       # TCP is available after the entrypoint's temporary initialization server exits.
@@ -59,7 +95,13 @@ services:
       PODCAST_INDEX_API_SECRET: ${PODCAST_INDEX_API_SECRET:-}
       PODCAST_SYNC_ENABLED: ${PODCAST_SYNC_ENABLED:-true}
       CORPUS_BUILD_ENABLED: ${CORPUS_BUILD_ENABLED:-true}
-      PODCAST_SYNC_FEED_IDS: ${PODCAST_SYNC_FEED_IDS:-920666}
+      CORPUS_EMBED_ENABLED: ${CORPUS_EMBED_ENABLED:-false}
+      OPENAI_EMBEDDING_API_KEY: ${OPENAI_EMBEDDING_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_TIMEOUT_SECONDS: ${OPENAI_EMBEDDING_TIMEOUT_SECONDS:-30}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      PODCAST_SYNC_FEED_IDS: ${PODCAST_SYNC_FEED_IDS:-542376}
     depends_on:
       postgres:
         condition: service_healthy
