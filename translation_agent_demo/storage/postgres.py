@@ -114,7 +114,12 @@ def initialize_schema(conn: psycopg.Connection) -> None:
         directory = Path(__file__).parent / "migrations"
         migrations = [
             (directory / name).read_text(encoding="utf-8")
-            for name in ("001_transcripts.sql", "002_podcast_sync.sql", "003_corpus_chunks.sql")
+            for name in (
+                "001_transcripts.sql", "002_podcast_sync.sql", "003_corpus_chunks.sql",
+                "004_corpus_embeddings.sql", "005_podcast_feed_reviews.sql",
+                "006_corpus_observations.sql", "007_corpus_markdown.sql",
+                "008_transcript_review_scope.sql",
+            )
         ]
         for sql in migrations:
             conn.execute(sql, prepare=False)

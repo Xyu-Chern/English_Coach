@@ -1,7 +1,7 @@
-"""Store acquired podcast text and provenance without granting reuse permission.
+"""Store acquired podcast text and inherit only applicable explicit reuse reviews.
 
-Unverified bodies are retained for local inspection. This module does not expose
-them to retrieval, create embeddings, or automatically approve publisher rights.
+Without a review, bodies remain unverified for local inspection. Metadata never
+grants permission, and explicitly revoked episode sources remain revoked.
 """
 
 import hashlib
@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 
 from ..providers.podcast_transcripts import MAX_TRANSCRIPT_BYTES, PodcastTranscript
 from .postgres import CorpusStorageError
+from .source_reviews import _read_feed_review, _source_evidence
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class StoredTranscript(PodcastTranscript):
     source_key: str
     content_sha256: str
     fetched_at: datetime
+    last_observed_at: datetime
     rights_status: Literal["unverified", "approved", "revoked"]
     language: str | None
     license_evidence: dict[str, Any] = field(repr=False)
@@ -52,8 +54,11 @@ def save_transcript(
 ) -> SaveTranscriptResult:
     """Upsert source metadata and retain one immutable version per distinct text.
 
-    Identical text returns the existing document ID. Missing optional metadata
-    preserves the previous value; source rights are never changed by ingestion.
+    Identical text returns the existing document ID and advances its observation
+    time, preserving the acquired body and fetched_at. Missing optional metadata
+    preserves the previous value. New/unverified sources inherit an explicit
+    approved transcript review whose URL scope matches; revocations are preserved.
+    A new URL outside that scope withdraws an existing source approval.
     The caller must finish HTTP work before invoking this short transaction.
     """
     if not isinstance(transcript, PodcastTranscript):
@@ -96,6 +101,9 @@ def save_transcript(
     evidence = Jsonb(license_evidence) if license_evidence is not None else None
     try:
         with conn.transaction():
+            # Lock before the source, including when no review row exists yet.
+            # Review changes cannot race this decision or its source insert.
+            review = _read_feed_review(conn, transcript.feed_id)
             # Updating the source serializes simultaneous imports for this episode.
             conn.execute(
                 """
@@ -107,7 +115,9 @@ def save_transcript(
                     title = EXCLUDED.title,
                     episode_url = COALESCE(EXCLUDED.episode_url, podcast_sources.episode_url),
                     language = COALESCE(EXCLUDED.language, podcast_sources.language),
-                    license_evidence = COALESCE(%s::jsonb, podcast_sources.license_evidence),
+                    license_evidence = CASE WHEN podcast_sources.rights_status <> 'unverified'
+                        THEN podcast_sources.license_evidence
+                        ELSE COALESCE(%s::jsonb, podcast_sources.license_evidence) END,
                     last_download_url = EXCLUDED.last_download_url,
                     updated_at = now()
                 """,
@@ -116,25 +126,49 @@ def save_transcript(
                  language.strip() if language is not None else None,
                  evidence, transcript.transcript_url, evidence),
             )
+            if review is not None and review.status == "approved":
+                conn.execute(
+                    """
+                    UPDATE public.podcast_sources
+                    SET rights_status = CASE
+                            WHEN public.transcript_url_matches_review_scope(last_download_url, %s)
+                                THEN 'approved' ELSE 'unverified' END,
+                        review_note = %s, review_url = %s,
+                        reviewed_at = %s, license_evidence = license_evidence || %s::jsonb,
+                        updated_at = now()
+                    WHERE source_key = %s AND rights_status IN ('unverified', 'approved')
+                    """,
+                    (review.transcript_url_prefix, review.review_note, review.review_url, review.reviewed_at,
+                     _source_evidence(review), source_key),
+                )
+            # The source lock serializes observations. Advancing beyond its latest
+            # timestamp also handles a clock adjustment or equal clock readings.
+            observed_at = conn.execute(
+                """
+                SELECT GREATEST(clock_timestamp(), max(last_observed_at) + interval '1 microsecond')
+                FROM public.podcast_transcripts WHERE source_key = %s
+                """,
+                (source_key,),
+            ).fetchone()[0]
             row = conn.execute(
                 """
                 INSERT INTO public.podcast_transcripts
                     (document_id, source_key, download_url, declared_type,
-                     content_type, content_sha256, raw_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                     content_type, content_sha256, raw_text, last_observed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (source_key, content_sha256) DO NOTHING
                 RETURNING document_id
                 """,
                 (uuid4(), source_key, transcript.transcript_url, transcript.declared_type,
-                 transcript.content_type, content_hash, transcript.text),
+                 transcript.content_type, content_hash, transcript.text, observed_at),
             ).fetchone()
             if row is not None:
                 result = SaveTranscriptResult(row[0], created=True)
             else:
                 row = conn.execute(
-                    "SELECT document_id FROM public.podcast_transcripts "
-                    "WHERE source_key = %s AND content_sha256 = %s",
-                    (source_key, content_hash),
+                    "UPDATE public.podcast_transcripts SET last_observed_at = %s "
+                    "WHERE source_key = %s AND content_sha256 = %s RETURNING document_id",
+                    (observed_at, source_key, content_hash),
                 ).fetchone()
                 if row is None:
                     raise CorpusStorageError("Could not resolve the existing transcript version.")
@@ -159,7 +193,7 @@ def get_transcript(conn: psycopg.Connection, document_id: UUID | str) -> StoredT
                 SELECT s.feed_id, s.episode_id, s.title AS episode_title, s.episode_url,
                        d.download_url AS transcript_url, d.declared_type, d.content_type,
                        d.raw_text AS text, d.document_id, d.source_key, d.content_sha256,
-                       d.fetched_at, s.rights_status, s.language, s.license_evidence
+                       d.fetched_at, d.last_observed_at, s.rights_status, s.language, s.license_evidence
                 FROM public.podcast_transcripts d
                 JOIN public.podcast_sources s USING (source_key)
                 WHERE d.document_id = %s
