@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener
 
 from .podcast_index import _NoRedirect, parse_retry_after_seconds
+from .changelog_transcripts import transcript_reference as changelog_transcript_reference
 
 MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024
 TIMEOUT_SECONDS = 15  # Per blocking network operation, not an overall deadline.
@@ -41,6 +42,46 @@ class PodcastTranscript:
     declared_type: str | None  # Podcast Index's format hint, e.g. application/srt.
     content_type: str | None  # Actual HTTP header; sometimes application/octet-stream.
     text: str = field(repr=False)  # Preserve cues/line breaks; avoid printing the full body.
+
+
+def select_corpus_transcript(
+    episode: dict[str, Any], *, published_changelog_episodes: frozenset[int] | None = None,
+) -> tuple[str, str | None]:
+    """Choose one supported English reference without making any HTTP requests.
+
+    Prefer timed SRT, then explicit Markdown, then HTML. Unknown legacy MIME
+    hints may still be sniffed by the parser; explicitly unsupported formats are
+    skipped. Changelog uses its separately licensed transcript repository.
+    """
+    alternate = changelog_transcript_reference(episode, published_numbers=published_changelog_episodes)
+    if alternate is not None:
+        return alternate
+    entries = episode.get("transcripts")
+    if not entries:
+        return _select_transcript(episode, 0)
+    if not isinstance(entries, list):
+        raise PodcastTranscriptError("Episode transcripts must be an array or null.")
+    ranks = {"application/x-subrip": 0, "application/srt": 0, "text/srt": 0, "text/x-srt": 0,
+             "text/markdown": 1, "text/html": 2, "application/xhtml+xml": 2,
+             "": 3, "text/plain": 3, "application/octet-stream": 3}
+    candidates = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        language = entry.get("language")
+        if language is not None and (
+            not isinstance(language, str) or language.strip().lower().split("-", 1)[0] != "en"
+        ):
+            continue
+        mime = entry.get("type")
+        if mime is not None and not isinstance(mime, str):
+            continue
+        mime = (mime or "").split(";", 1)[0].strip().lower()
+        if mime in ranks and isinstance(entry.get("url"), str) and entry["url"]:
+            candidates.append((ranks[mime], index))
+    if not candidates:
+        raise PodcastTranscriptError("No supported English transcript reference was advertised.")
+    return _select_transcript(episode, min(candidates)[1])
 
 
 def fetch_episode_transcript(
