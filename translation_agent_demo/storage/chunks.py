@@ -51,8 +51,8 @@ def _times(start_ms: int | None, end_ms: int | None) -> None:
 
 
 def _validate_chunks(parsed: ParsedTranscript, chunks: tuple[CorpusChunk, ...]) -> None:
-    if not isinstance(parsed, ParsedTranscript) or parsed.format not in ("html", "srt"):
-        raise ValueError("parsed must identify an HTML or SRT transcript.")
+    if not isinstance(parsed, ParsedTranscript) or parsed.format not in ("html", "srt", "markdown"):
+        raise ValueError("parsed must identify an HTML, SRT or Markdown transcript.")
     if not isinstance(parsed.cues, tuple) or not parsed.cues:
         raise ValueError("A ready build requires a nonempty cue tuple.")
     for index, cue in enumerate(parsed.cues):
@@ -95,7 +95,7 @@ def _validate_chunks(parsed: ParsedTranscript, chunks: tuple[CorpusChunk, ...]) 
 def pending_document_ids(
     conn: psycopg.Connection, processing_version: str, *, limit: int = 10,
 ) -> tuple[UUID, ...]:
-    """Select old-to-new raw revisions without a terminal build for this version.
+    """Select approved raw revisions without a terminal build for this version.
 
     This is a bounded read, not a claim. Concurrent callers may parse the same
     document; the unique build identity makes their eventual writes idempotent.
@@ -108,7 +108,8 @@ def pending_document_ids(
             rows = cursor.execute(
                 """
                 SELECT d.document_id FROM public.podcast_transcripts AS d
-                WHERE NOT EXISTS (
+                JOIN public.podcast_sources AS s USING (source_key)
+                WHERE s.rights_status = 'approved' AND NOT EXISTS (
                     SELECT 1 FROM public.corpus_builds AS b
                     WHERE b.document_id = d.document_id AND b.processing_version = %s
                 )

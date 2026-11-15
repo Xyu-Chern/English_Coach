@@ -1,4 +1,4 @@
-"""Parse the acquired HTML/SRT formats without rewriting publisher wording."""
+"""Parse acquired HTML/SRT/Markdown without rewriting publisher wording."""
 
 import json
 import re
@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 
 from .models import CorpusParseError, Cue, ParsedTranscript
 
-PARSER_VERSION = "html-srt-v2"
+PARSER_VERSION = "html-srt-markdown-v3"
 
 _TIME = r"\d{1,6}:[0-5]\d(?::[0-5]\d)?(?:[.,]\d{1,3})?"
 _BRACKET_TIME = re.compile(rf"\[({_TIME})\]")
@@ -19,6 +19,8 @@ _SRT_SIGNATURE = re.compile(rf"^{_SRT_TIME}\s*-->", re.MULTILINE)
 _HTML_SIGNATURE = re.compile(r"</?(?:html|body|p|div|cite|time|h[1-6]|article|section|br|span)\b", re.I)
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
 _SRT_TYPES = {"application/x-subrip", "application/srt", "text/srt", "text/x-srt"}
+_MARKDOWN_SPEAKER = re.compile(r"^\*\*([^*:\r\n]{1,100}):\*\*[ \t]*")
+_MARKDOWN_TIME = re.compile(r"^\[(\d{2,6}:[0-5]\d:[0-5]\d(?:\.\d{3})?)\](?=\s|$)")
 _PAGE_ERROR = re.compile(
     r"^(?:(?:403|404|410|429|500|502|503|504)\b|access denied\b|forbidden\b|"
     r"not found\b|page not found\b|internal server error\b|bad gateway\b|"
@@ -38,19 +40,6 @@ def _milliseconds(value: str) -> int:
     if len(parts) == 3:
         seconds += 3600 * parts[0]
     return seconds * 1000 + int(fraction.ljust(3, "0") or "0")
-
-
-def _speaker_label(text: str) -> bool:
-    """Recognize name-like labels only where punctuation already marks a label."""
-    words = text.split()
-    return (
-        0 < len(text) <= 100 and 0 < len(words) <= 8
-        and text.casefold() not in {"music", "laughter", "applause", "silence", "inaudible",
-                                    "transcript", "transcription", "host", "guest", "note", "notes"}
-        and all(word[0].isupper() or word.isdecimal() or word in {"de", "van", "von", "da", "del"}
-                for word in words)
-        and not re.search(r"[!?;:=\[\]()]", text)
-    )
 
 
 class _HTMLBlocks(HTMLParser):
@@ -108,9 +97,6 @@ class _HTMLBlocks(HTMLParser):
         elif tag in {"cite", "time"} and not _clean("".join(self.parts)):
             self.capture = (tag, tag, [])
             self.capture_depth = 1
-        elif tag in {"b", "strong"} and self.kind != "heading" and not _clean("".join(self.parts)):
-            self.capture = (tag, "label", [])
-            self.capture_depth = 1
         elif tag == "span" and "data-t" in dict(attrs):
             value = dict(attrs)["data-t"] or ""
             if self.start_ms is None and re.fullmatch(r"\d{1,9}(?:\.\d{1,3})?", value):
@@ -161,8 +147,6 @@ class _HTMLBlocks(HTMLParser):
             self.blocks.append(("cite", text.rstrip(":"), None))
         elif kind == "time" and re.fullmatch(_TIME, text):
             self.blocks.append(("time", "", _milliseconds(text)))
-        elif kind == "label" and text.endswith(":") and _speaker_label(text[:-1]):
-            self.blocks.append(("speaker", text[:-1], None))
         elif kind == "word":
             # Word spans may touch in HTML or be separated by formatting newlines.
             while self.parts and not self.parts[-1].rstrip():
@@ -225,7 +209,7 @@ def _parse_html(text: str) -> ParsedTranscript:
         emit(value[offset:])
 
     for kind, value, start in blocks:
-        if kind in {"cite", "speaker"}:
+        if kind == "cite":
             speaker, cite_only = value, kind == "cite"
             continue
         if kind == "time":
@@ -241,8 +225,7 @@ def _parse_html(text: str) -> ParsedTranscript:
         for line in value.splitlines():
             line = _clean(line)
             named_time, time_label = _NAMED_TIME.fullmatch(line), _TIME_LABEL.fullmatch(line)
-            label = line[:-1] if line.endswith(":") else line[1:-1] if line.startswith("[") and line.endswith("]") else ""
-            if not line or named_time or time_label or (label and _speaker_label(label)):
+            if not line or named_time or time_label:
                 paragraph(lines)
                 lines = []
                 if named_time:
@@ -251,8 +234,6 @@ def _parse_html(text: str) -> ParsedTranscript:
                     pending_start = _milliseconds(time_label[1])
                     if time_label[2]:
                         speaker = time_label[2]
-                elif label:
-                    speaker = label
             else:
                 lines.append(line)
         paragraph(lines)
@@ -285,14 +266,47 @@ def _parse_srt(text: str) -> ParsedTranscript:
     return ParsedTranscript("srt", tuple(cues))
 
 
+def _parse_markdown(text: str) -> ParsedTranscript:
+    """Parse transcript paragraphs, not arbitrary Markdown presentation.
+
+    Only a paragraph's leading **Speaker:** is metadata; unlabelled paragraphs
+    have no inferred speaker. Bracket escapes are rendered as literal brackets.
+    Other markup and all timestamp text stay in the cue. A leading explicit
+    [HH:MM:SS] or [HH:MM:SS.mmm] also supplies start_ms; no end time is inferred.
+    In particular, MM:SS remains text without being guessed as a cue timestamp.
+    """
+    cues: list[Cue] = []
+    for paragraph in re.split(r"\n[ \t]*\n", text.strip()):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        body, speaker = paragraph, None
+        label = _MARKDOWN_SPEAKER.match(paragraph)
+        if label and _clean(label[1]) and paragraph[label.end():].strip():
+            speaker = _clean(label[1])
+            body = paragraph[label.end():]
+        # The publisher escapes brackets in timestamps and stage directions.
+        # Rendering these escapes does not remove the enclosed source wording.
+        body = _clean(re.sub(r"\\([\[\]])", r"\1", body))
+        timing = _MARKDOWN_TIME.match(body)
+        cues.append(Cue(
+            len(cues), body, speaker=speaker,
+            start_ms=_milliseconds(timing[1]) if timing else None,
+        ))
+    if not cues:
+        raise CorpusParseError("empty_transcript")
+    return ParsedTranscript("markdown", tuple(cues))
+
+
 def parse_transcript(
     text: str, *, declared_type: str | None = None, content_type: str | None = None,
 ) -> ParsedTranscript:
-    """Accept HTML/SRT evidence, including declared HTML served as plain text.
+    """Accept HTML/SRT/Markdown evidence and declared text served as plain text.
 
-    Unknown plain text, JSON and WebVTT are unsupported. Malformed SRT fails as
-    a document rather than quietly dropping nonempty blocks. HTML has no inferred
-    end times; headings and unrecognized prose remain attributable source text.
+    Markdown requires an explicit text/markdown MIME declaration; its syntax is
+    never inferred from unknown plain text. JSON and WebVTT remain unsupported.
+    Malformed SRT fails as a document rather than dropping nonempty blocks.
+    Headings and unrecognized prose remain attributable source text.
     """
     if not isinstance(text, str) or any(value is not None and not isinstance(value, str)
                                         for value in (declared_type, content_type)):
@@ -300,7 +314,9 @@ def parse_transcript(
     text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     if not text.strip():
         raise CorpusParseError("empty_transcript")
-    types = {(value or "").split(";", 1)[0].strip().lower() for value in (declared_type, content_type)}
+    declared, actual = ((value or "").split(";", 1)[0].strip().lower()
+                        for value in (declared_type, content_type))
+    types = {declared, actual}
     if text.lstrip().startswith("WEBVTT") or any(value == "text/vtt" or value.endswith("/json") or value.endswith("+json")
                                                for value in types):
         raise CorpusParseError("unsupported_format")
@@ -311,6 +327,10 @@ def parse_transcript(
             pass
         else:
             raise CorpusParseError("unsupported_format")
+    if "text/markdown" in types:
+        if actual not in {"", "text/plain", "text/markdown"} or declared not in {"", "text/plain", "text/markdown"}:
+            raise CorpusParseError("invalid_format")
+        return _parse_markdown(text)
     if types & _SRT_TYPES or _SRT_SIGNATURE.search(text):
         return _parse_srt(text)
     if types & _HTML_TYPES or _HTML_SIGNATURE.search(text):

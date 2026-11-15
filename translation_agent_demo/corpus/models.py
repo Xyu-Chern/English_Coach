@@ -14,7 +14,7 @@ class CorpusParseError(Exception):
 
 @dataclass(frozen=True)
 class Cue:
-    """One subtitle cue or HTML turn/paragraph in source order.
+    """One subtitle cue or HTML/Markdown turn/paragraph in source order.
 
     Times are explicit publisher timestamps in milliseconds, never inferred from
     the next cue. Missing timing and speaker information stays null.
@@ -29,7 +29,7 @@ class Cue:
 
 @dataclass(frozen=True)
 class ParsedTranscript:
-    format: Literal["html", "srt"]
+    format: Literal["html", "srt", "markdown"]
     cues: tuple[Cue, ...]
 
 
