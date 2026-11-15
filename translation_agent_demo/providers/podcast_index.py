@@ -1,0 +1,145 @@
+"""Small, read-only Podcast Index adapter; independent of the translation model.
+
+Each method makes one request for at most ten records. There is deliberately no
+pagination, retry loop, feed traversal, transcript download, or index crawler.
+"""
+
+import hashlib
+import json
+import os
+import time
+from dataclasses import dataclass, field
+from http.client import HTTPException
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from ..config import _read_env_file
+
+BASE_URL = "https://api.podcastindex.org/api/1.0"  # Send credentials only to this API.
+MAX_RESULTS = 10  # Local exploration limit, not the upstream API's maximum.
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # Bound memory used by an external response.
+TIMEOUT_SECONDS = 15  # Timeout for blocking network operations; not an overall deadline.
+
+
+class PodcastIndexError(Exception):
+    """A safe error message with no credentials or upstream response body."""
+
+
+@dataclass(frozen=True)
+class PodcastIndexCredentials:
+    api_key: str = field(repr=False)  # Keep keys out of the generated repr.
+    api_secret: str = field(repr=False)  # Keep secrets out of the generated repr.
+
+    def __post_init__(self) -> None:
+        for value in (self.api_key, self.api_secret):
+            if not isinstance(value, str) or not value or not value.isascii():
+                raise PodcastIndexError("Podcast Index credentials must be nonempty ASCII strings.")
+            if any(ord(char) < 33 or ord(char) > 126 for char in value):
+                raise PodcastIndexError("Podcast Index credentials cannot contain whitespace or controls.")
+
+    @classmethod
+    def from_environment(cls, env_file: Path | None = None) -> "PodcastIndexCredentials":
+        # Reuse the demo's KEY=VALUE reader without requiring any LLM settings.
+        path = env_file if env_file is not None else Path(__file__).resolve().parents[1] / ".env"
+        try:
+            values = _read_env_file(path)
+        except (OSError, UnicodeError):
+            raise PodcastIndexError("Could not read the Podcast Index environment file.") from None
+        values.update(os.environ)  # Process environment takes precedence over .env.
+        names = ("PODCAST_INDEX_API_KEY", "PODCAST_INDEX_API_SECRET")
+        missing = [name for name in names if not values.get(name, "").strip()]
+        if missing:
+            raise PodcastIndexError("Set " + " and ".join(missing) + ".")
+        return cls(*(values[name].strip() for name in names))
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # Do not forward signed headers or make a second request.
+
+
+class PodcastIndexClient:
+    """Fetch metadata for explicitly chosen searches or a single feed.
+
+    Results retain the provider's JSON field names, including transcript URLs
+    and any rights metadata. They are untrusted metadata, not reuse permission.
+    This adapter does not implement the translation-specific ChatModel protocol.
+    """
+
+    def __init__(self, credentials: PodcastIndexCredentials) -> None:
+        self._credentials = credentials
+
+    def search_podcasts(self, query: str, *, limit: int = 5) -> dict[str, Any]:
+        """Search show metadata, not transcript content; perform one GET."""
+        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
+            raise ValueError("query must contain 1 to 200 nonblank characters.")
+        self._validate_limit(limit)
+        return self._get("/search/byterm", {"q": query.strip(), "max": limit}, "feeds")
+
+    def episodes_by_feed_id(self, feed_id: int, *, limit: int = 5) -> dict[str, Any]:
+        """Fetch a bounded episode sample from one explicitly selected feed."""
+        if type(feed_id) is not int or feed_id <= 0:
+            raise ValueError("feed_id must be one positive integer.")
+        self._validate_limit(limit)
+        return self._get("/episodes/byfeedid", {"id": feed_id, "max": limit}, "items")
+
+    @staticmethod
+    def _validate_limit(limit: int) -> None:
+        if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
+            raise ValueError(f"limit must be an integer from 1 to {MAX_RESULTS}.")
+
+    def _get(self, endpoint: str, params: dict[str, str | int], records_key: str) -> dict[str, Any]:
+        timestamp = str(int(time.time()))  # UTC Unix seconds, generated for each request.
+        credentials = self._credentials
+        material = credentials.api_key + credentials.api_secret + timestamp
+        signature = hashlib.sha1(material.encode("utf-8")).hexdigest()  # Required by this API.
+        request = Request(
+            BASE_URL + endpoint + "?" + urlencode(params),  # Encode search text as data.
+            headers={
+                "User-Agent": "EnglishCoach-PodcastMetadata/0.1",
+                "X-Auth-Key": credentials.api_key,
+                "X-Auth-Date": timestamp,
+                "Authorization": signature,  # The secret itself is never sent as a header.
+                "Accept": "application/json",
+            },
+            method="GET",
+        )
+        try:
+            with build_opener(_NoRedirect()).open(request, timeout=TIMEOUT_SECONDS) as response:
+                raw = response.read(MAX_RESPONSE_BYTES + 1)  # One extra byte detects overflow.
+        except HTTPError as exc:
+            # No retry, including 401/403/429; don't expose upstream text or request headers.
+            code = exc.code
+            exc.close()
+            raise PodcastIndexError(f"Podcast Index returned HTTP {code}; no retry was made.") from None
+        except (URLError, OSError, HTTPException):
+            raise PodcastIndexError("Could not read the Podcast Index response; no retry was made.") from None
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise PodcastIndexError("Podcast Index response exceeded the 2 MiB limit.")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError):
+            raise PodcastIndexError("Podcast Index returned invalid JSON.") from None
+        # Check the envelope and record identities while retaining optional source fields.
+        if not isinstance(payload, dict):
+            raise PodcastIndexError("Podcast Index returned an invalid response envelope.")
+        status = payload.get("status")
+        if status is not True and status != "true":
+            raise PodcastIndexError("Podcast Index did not report a successful request.")
+        records = payload.get(records_key)
+        if not isinstance(records, list) or len(records) > params["max"]:
+            raise PodcastIndexError("Podcast Index returned an invalid or oversized record list.")
+        for record in records:
+            if (
+                not isinstance(record, dict)
+                or type(record.get("id")) is not int
+                or record["id"] <= 0
+                or not isinstance(record.get("title"), str)
+            ):
+                raise PodcastIndexError("Podcast Index returned a record with invalid identity fields.")
+            if records_key == "items" and record.get("feedId") != params["id"]:
+                raise PodcastIndexError("Podcast Index returned an episode from an unexpected feed.")
+        return payload  # No transcript body, URL traversal, storage, or LLM call follows.
