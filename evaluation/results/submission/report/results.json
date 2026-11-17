@@ -1,0 +1,1019 @@
+{
+  "info": {
+    "run": "submission",
+    "task_file": "evaluation/data/tasks.jsonl",
+    "tasks_sha256": "7bc659a9374eaec107db67c1d80d2a9d8fefde22a31fe664d26121d857d9e735",
+    "tasks": 50,
+    "repeats": 3,
+    "model": "claude-haiku-5-5",
+    "effort": "medium",
+    "judge": {
+      "model": "gpt-5.4-mini-2026-03-17",
+      "protocol": "multi-expression-grader-v2",
+      "votes": 3
+    },
+    "snapshot": "corpus-20261116-full-v2",
+    "corpus_sha256": "c2357ddebdbff9be158d63ed70ca3fc5c86dbc2368fc2d96d840720f203c6e24",
+    "commit": "173cbedfa449799338ba70f85ea4fda2c37dc2a5",
+    "diff_sha256": "d30366bb179a0a277fb7ffdec0f4609fa8e848005149e6e49e777cda49c4406f",
+    "derived_from": {
+      "run": "evaluation run of 2026-11-17 (50 tasks x 3 runs, baseline and agent)",
+      "note": "Attempts and grades were recorded by the evaluation run of 2026-11-17 and copied here unchanged except for the system names. That run used the same baseline and agent logic as this code: replaying every attempt through this code gives the same prompts, user messages, schema structure, steps, answers and token counts. Two later edits did not change what the systems or the judge read: the task file gained type, question_en and rubric (question and intended are byte-identical), and three reply-schema descriptions were shortened (internal names removed)."
+    }
+  },
+  "systems": {
+    "baseline": "Baseline",
+    "agent": "Agent"
+  },
+  "repeats": 3,
+  "task_counts": {
+    "total": 50,
+    "answer": 43
+  },
+  "coverage": {
+    "baseline": {
+      "expected": 150,
+      "recorded": 150,
+      "graded": 150,
+      "ungraded": [],
+      "infrastructure_failures": 0,
+      "error_codes": {}
+    },
+    "agent": {
+      "expected": 150,
+      "recorded": 150,
+      "graded": 150,
+      "ungraded": [],
+      "infrastructure_failures": 0,
+      "error_codes": {}
+    }
+  },
+  "metrics": {
+    "baseline": {
+      "graded": 150,
+      "accuracy": {
+        "passed": 133,
+        "n": 150,
+        "rate": 0.8866666666666667
+      },
+      "strict": {
+        "passed": 92,
+        "n": 150,
+        "rate": 0.6133333333333333
+      },
+      "empty_answer": {
+        "passed": 2,
+        "n": 129,
+        "rate": 0.015503875968992248
+      },
+      "turns_mean": 3.2533333333333334,
+      "rounds_mean": 0.7466666666666667,
+      "latency_mean_s": 26.09904560443363,
+      "latency_p95_s": 51.69449374996475,
+      "tokens_mean": 40332.473333333335,
+      "cost_mean_usd": 0.0055302854666666665,
+      "traced": 150,
+      "after_prefix": {
+        "continuation_calls_mean": 1.3933333333333333,
+        "continuation_searches_mean": 0.8533333333333334,
+        "wasted_searches_mean": 0.66,
+        "prefix_tokens_mean": 19451.586666666666,
+        "continuation_tokens_mean": 20880.886666666665,
+        "prefix_ms_mean": 18615.351233416975,
+        "continuation_ms_mean": 7470.867985505222,
+        "prefix_usd_mean": 0.0029736138666666668,
+        "continuation_usd_mean": 0.0025566716
+      }
+    },
+    "agent": {
+      "graded": 150,
+      "accuracy": {
+        "passed": 138,
+        "n": 150,
+        "rate": 0.92
+      },
+      "strict": {
+        "passed": 104,
+        "n": 150,
+        "rate": 0.6933333333333334
+      },
+      "empty_answer": {
+        "passed": 3,
+        "n": 129,
+        "rate": 0.023255813953488372
+      },
+      "turns_mean": 3.42,
+      "rounds_mean": 1.5,
+      "latency_mean_s": 33.35303822717319,
+      "latency_p95_s": 60.475132833991665,
+      "tokens_mean": 58607.986666666664,
+      "cost_mean_usd": 0.0079787048,
+      "traced": 150,
+      "after_prefix": {
+        "continuation_calls_mean": 1.56,
+        "continuation_searches_mean": 0.6866666666666666,
+        "wasted_searches_mean": 0.36666666666666664,
+        "prefix_tokens_mean": 19451.586666666666,
+        "continuation_tokens_mean": 39156.4,
+        "prefix_ms_mean": 18615.351233416975,
+        "continuation_ms_mean": 14725.639820101398,
+        "prefix_usd_mean": 0.0029736138666666668,
+        "continuation_usd_mean": 0.005005090933333334
+      }
+    }
+  },
+  "pass_k": {
+    "baseline": {
+      "tasks": 50,
+      "any_pass": 48,
+      "all_pass": 39,
+      "pass_at_k": 0.96,
+      "pass_hat_k": 0.78
+    },
+    "agent": {
+      "tasks": 50,
+      "any_pass": 48,
+      "all_pass": 43,
+      "pass_at_k": 0.96,
+      "pass_hat_k": 0.86
+    }
+  },
+  "groups": [
+    {
+      "name": "answer",
+      "tasks": 43,
+      "baseline": {
+        "pass": {
+          "passed": 112,
+          "n": 129,
+          "rate": 0.8682170542635659
+        },
+        "strict": {
+          "passed": 71,
+          "n": 129,
+          "rate": 0.5503875968992248
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 117,
+          "n": 129,
+          "rate": 0.9069767441860465
+        },
+        "strict": {
+          "passed": 83,
+          "n": 129,
+          "rate": 0.6434108527131783
+        }
+      }
+    },
+    {
+      "name": "edge",
+      "tasks": 6,
+      "baseline": {
+        "pass": {
+          "passed": 14,
+          "n": 18,
+          "rate": 0.7777777777777778
+        },
+        "strict": {
+          "passed": 5,
+          "n": 18,
+          "rate": 0.2777777777777778
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 16,
+          "n": 18,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 9,
+          "n": 18,
+          "rate": 0.5
+        }
+      }
+    },
+    {
+      "name": "unanswerable",
+      "tasks": 7,
+      "baseline": {
+        "pass": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        }
+      }
+    }
+  ],
+  "categories": [
+    {
+      "name": "specific/context",
+      "tasks": 6,
+      "baseline": {
+        "pass": {
+          "passed": 16,
+          "n": 18,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 8,
+          "n": 18,
+          "rate": 0.4444444444444444
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 16,
+          "n": 18,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 10,
+          "n": 18,
+          "rate": 0.5555555555555556
+        }
+      }
+    },
+    {
+      "name": "specific/constraint",
+      "tasks": 4,
+      "baseline": {
+        "pass": {
+          "passed": 12,
+          "n": 12,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 9,
+          "n": 12,
+          "rate": 0.75
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 12,
+          "n": 12,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 10,
+          "n": 12,
+          "rate": 0.8333333333333334
+        }
+      }
+    },
+    {
+      "name": "function/context",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 8,
+          "n": 9,
+          "rate": 0.8888888888888888
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 7,
+          "n": 9,
+          "rate": 0.7777777777777778
+        }
+      }
+    },
+    {
+      "name": "function/constraint",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 7,
+          "n": 9,
+          "rate": 0.7777777777777778
+        },
+        "strict": {
+          "passed": 5,
+          "n": 9,
+          "rate": 0.5555555555555556
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 7,
+          "n": 9,
+          "rate": 0.7777777777777778
+        }
+      }
+    },
+    {
+      "name": "draft/context",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 4,
+          "n": 9,
+          "rate": 0.4444444444444444
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 4,
+          "n": 9,
+          "rate": 0.4444444444444444
+        }
+      }
+    },
+    {
+      "name": "draft/constraint",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 5,
+          "n": 9,
+          "rate": 0.5555555555555556
+        },
+        "strict": {
+          "passed": 4,
+          "n": 9,
+          "rate": 0.4444444444444444
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        },
+        "strict": {
+          "passed": 4,
+          "n": 9,
+          "rate": 0.4444444444444444
+        }
+      }
+    },
+    {
+      "name": "usage/plain",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 8,
+          "n": 9,
+          "rate": 0.8888888888888888
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        }
+      }
+    },
+    {
+      "name": "usage/context",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 8,
+          "n": 9,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 4,
+          "n": 9,
+          "rate": 0.4444444444444444
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        }
+      }
+    },
+    {
+      "name": "usage/constraint",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        },
+        "strict": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        },
+        "strict": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        }
+      }
+    },
+    {
+      "name": "compare/context",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 7,
+          "n": 9,
+          "rate": 0.7777777777777778
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 9,
+          "n": 9,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 6,
+          "n": 9,
+          "rate": 0.6666666666666666
+        }
+      }
+    },
+    {
+      "name": "compare/constraint",
+      "tasks": 3,
+      "baseline": {
+        "pass": {
+          "passed": 8,
+          "n": 9,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 3,
+          "n": 9,
+          "rate": 0.3333333333333333
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 7,
+          "n": 9,
+          "rate": 0.7777777777777778
+        },
+        "strict": {
+          "passed": 5,
+          "n": 9,
+          "rate": 0.5555555555555556
+        }
+      }
+    },
+    {
+      "name": "edge",
+      "tasks": 6,
+      "baseline": {
+        "pass": {
+          "passed": 14,
+          "n": 18,
+          "rate": 0.7777777777777778
+        },
+        "strict": {
+          "passed": 5,
+          "n": 18,
+          "rate": 0.2777777777777778
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 16,
+          "n": 18,
+          "rate": 0.8888888888888888
+        },
+        "strict": {
+          "passed": 9,
+          "n": 18,
+          "rate": 0.5
+        }
+      }
+    },
+    {
+      "name": "unanswerable",
+      "tasks": 7,
+      "baseline": {
+        "pass": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        },
+        "strict": {
+          "passed": 21,
+          "n": 21,
+          "rate": 1.0
+        }
+      }
+    }
+  ],
+  "comparison": {
+    "pass": {
+      "a": "agent",
+      "b": "baseline",
+      "tasks": 43,
+      "difference": 0.03875968992248063,
+      "ci95": [
+        -0.007751937984496124,
+        0.09302325581395349
+      ],
+      "seed": 7,
+      "resamples": 4000,
+      "excluded_units": [],
+      "all_units": {
+        "a": "agent",
+        "b": "baseline",
+        "tasks": 43,
+        "difference": 0.03875968992248063,
+        "ci95": [
+          -0.007751937984496124,
+          0.09302325581395349
+        ],
+        "seed": 7,
+        "resamples": 4000
+      }
+    },
+    "strict": {
+      "a": "agent",
+      "b": "baseline",
+      "tasks": 43,
+      "difference": 0.09302325581395349,
+      "ci95": [
+        0.031007751937984496,
+        0.16279069767441862
+      ],
+      "seed": 7,
+      "resamples": 4000,
+      "excluded_units": [],
+      "all_units": {
+        "a": "agent",
+        "b": "baseline",
+        "tasks": 43,
+        "difference": 0.09302325581395349,
+        "ci95": [
+          0.031007751937984496,
+          0.16279069767441862
+        ],
+        "seed": 7,
+        "resamples": 4000
+      }
+    },
+    "empty_difference": 0.007751937984496124,
+    "checks": {
+      "pass_non_inferiority": true,
+      "strict_superiority": true,
+      "empty_answers": true
+    },
+    "pass_margin": -0.05,
+    "empty_limit": 0.03
+  },
+  "subgroups": {
+    "review": {
+      "units": 82,
+      "baseline": {
+        "pass": {
+          "passed": 79,
+          "n": 82,
+          "rate": 0.9634146341463414
+        },
+        "strict": {
+          "passed": 57,
+          "n": 82,
+          "rate": 0.6951219512195121
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 79,
+          "n": 82,
+          "rate": 0.9634146341463414
+        },
+        "strict": {
+          "passed": 57,
+          "n": 82,
+          "rate": 0.6951219512195121
+        }
+      }
+    },
+    "recovery": {
+      "units": 47,
+      "baseline": {
+        "pass": {
+          "passed": 33,
+          "n": 47,
+          "rate": 0.7021276595744681
+        },
+        "strict": {
+          "passed": 14,
+          "n": 47,
+          "rate": 0.2978723404255319
+        }
+      },
+      "agent": {
+        "pass": {
+          "passed": 38,
+          "n": 47,
+          "rate": 0.8085106382978723
+        },
+        "strict": {
+          "passed": 26,
+          "n": 47,
+          "rate": 0.5531914893617021
+        }
+      }
+    }
+  },
+  "flips": {
+    "baseline": [
+      {
+        "task_id": "ko-spec-idiom-ctx-2",
+        "category": "specific/context",
+        "pattern": "F P P"
+      },
+      {
+        "task_id": "ko-spec-idiom-ctx-3",
+        "category": "specific/context",
+        "pattern": "P P F"
+      },
+      {
+        "task_id": "ko-func-con-2",
+        "category": "function/constraint",
+        "pattern": "P F F"
+      },
+      {
+        "task_id": "ko-draft-con-2",
+        "category": "draft/constraint",
+        "pattern": "P F P"
+      },
+      {
+        "task_id": "ko-usage-ctx-3",
+        "category": "usage/context",
+        "pattern": "F P P"
+      },
+      {
+        "task_id": "ko-cmp-con-1",
+        "category": "compare/constraint",
+        "pattern": "P P F"
+      },
+      {
+        "task_id": "ko-edge-typo_keys",
+        "category": "edge/typo_keys",
+        "pattern": "F P P"
+      },
+      {
+        "task_id": "ko-edge-code_switching",
+        "category": "edge/code_switching",
+        "pattern": "F P F"
+      },
+      {
+        "task_id": "ko-edge-english_only",
+        "category": "edge/english_only",
+        "pattern": "P P F"
+      }
+    ],
+    "agent": [
+      {
+        "task_id": "ko-spec-ctx-1",
+        "category": "specific/context",
+        "pattern": "P P F"
+      },
+      {
+        "task_id": "ko-spec-idiom-ctx-3",
+        "category": "specific/context",
+        "pattern": "F P P"
+      },
+      {
+        "task_id": "ko-cmp-con-1",
+        "category": "compare/constraint",
+        "pattern": "P F F"
+      },
+      {
+        "task_id": "ko-edge-code_switching",
+        "category": "edge/code_switching",
+        "pattern": "F P P"
+      },
+      {
+        "task_id": "ko-edge-english_only",
+        "category": "edge/english_only",
+        "pattern": "P P F"
+      }
+    ]
+  },
+  "candidate_failures": [
+    {
+      "system": "baseline",
+      "task_id": "ko-spec-idiom-ctx-2",
+      "attempt": 1,
+      "category": "specific/context",
+      "step": "verified slots: first stage 1/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 shows_use=fail, explanation_ok=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-spec-idiom-ctx-3",
+      "attempt": 3,
+      "category": "specific/context",
+      "step": "verified slots: first stage 1/3 → final 1/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 no example; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-func-con-2",
+      "attempt": 2,
+      "category": "function/constraint",
+      "step": "verified slots: first stage 1/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 shows_use=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-func-con-2",
+      "attempt": 3,
+      "category": "function/constraint",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 explanation_ok=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-draft-con-1",
+      "attempt": 1,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-draft-con-1",
+      "attempt": 2,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 1/3 → final 1/3 after 3 rounds",
+      "reason": "grounded-good 0/3; #1 fits=fail, natural=fail, shows_use=fail; #2 no example; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-draft-con-1",
+      "attempt": 3,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 shows_use=fail, explanation_ok=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-draft-con-2",
+      "attempt": 2,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 0 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail; #2 shows_use=fail"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-usage-ctx-3",
+      "attempt": 1,
+      "category": "usage/context",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #1 fits=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-usage-con-4",
+      "attempt": 1,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 1/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 fits=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-usage-con-4",
+      "attempt": 2,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 0/3 → final 1/3 after 3 rounds",
+      "reason": "set constraint failed; grounded-good 0/3; #1 fits=fail, explanation_ok=fail; #2 fits=fail, no example; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-usage-con-4",
+      "attempt": 3,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 0/3 → final 1/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 fits=fail, no example; #3 fits=fail, no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-cmp-con-1",
+      "attempt": 3,
+      "category": "compare/constraint",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 0 rounds",
+      "reason": "grounded-good 1/3; #2 explanation_ok=fail; #3 explanation_ok=fail"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-edge-typo_keys",
+      "attempt": 1,
+      "category": "edge/typo_keys",
+      "step": "verified slots: first stage 1/3 → final 3/3 after 2 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail; #2 shows_use=fail"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-edge-code_switching",
+      "attempt": 1,
+      "category": "edge/code_switching",
+      "step": "verified slots: first stage 2/3 → final 3/3 after 1 round",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #2 shows_use=fail, explanation_ok=fail"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-edge-code_switching",
+      "attempt": 3,
+      "category": "edge/code_switching",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #3 no example"
+    },
+    {
+      "system": "baseline",
+      "task_id": "ko-edge-english_only",
+      "attempt": 3,
+      "category": "edge/english_only",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 0 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail; #3 explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-spec-ctx-1",
+      "attempt": 3,
+      "category": "specific/context",
+      "step": "verified slots: first stage 1/3 → final 3/3 after 2 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #3 shows_use=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-spec-idiom-ctx-3",
+      "attempt": 1,
+      "category": "specific/context",
+      "step": "verified slots: first stage 0/3 → final 1/3 after 1 round",
+      "reason": "grounded-good 1/3; #2 no example; #3 no example"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-draft-con-1",
+      "attempt": 1,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail; #3 no example"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-draft-con-1",
+      "attempt": 2,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 1/3 → final 1/3 after 3 rounds",
+      "reason": "grounded-good 0/3; #1 fits=fail, natural=fail, shows_use=fail; #2 no example; #3 no example"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-draft-con-1",
+      "attempt": 3,
+      "category": "draft/constraint",
+      "step": "verified slots: first stage 2/3 → final 2/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 shows_use=fail, explanation_ok=fail; #3 no example"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-usage-con-4",
+      "attempt": 1,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 1/3 → final 3/3 after 3 rounds",
+      "reason": "grounded-good 1/3; #2 fits=fail; #3 fits=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-usage-con-4",
+      "attempt": 2,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 0/3 → final 3/3 after 3 rounds",
+      "reason": "set constraint failed; grounded-good 0/3; #1 fits=fail; #2 fits=fail, natural=fail; #3 fits=fail, explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-usage-con-4",
+      "attempt": 3,
+      "category": "usage/constraint",
+      "step": "verified slots: first stage 0/3 → final 3/3 after 3 rounds",
+      "reason": "grounded-good 0/3; #1 fits=fail, explanation_ok=fail; #2 explanation_ok=fail; #3 fits=fail, explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-cmp-con-1",
+      "attempt": 2,
+      "category": "compare/constraint",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 1 round",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #3 fits=fail, explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-cmp-con-1",
+      "attempt": 3,
+      "category": "compare/constraint",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 2 rounds",
+      "reason": "grounded-good 1/3; #2 explanation_ok=fail; #3 explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-edge-code_switching",
+      "attempt": 1,
+      "category": "edge/code_switching",
+      "step": "verified slots: first stage 2/3 → final 3/3 after 1 round",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #2 shows_use=fail, explanation_ok=fail"
+    },
+    {
+      "system": "agent",
+      "task_id": "ko-edge-english_only",
+      "attempt": 3,
+      "category": "edge/english_only",
+      "step": "verified slots: first stage 3/3 → final 3/3 after 2 rounds",
+      "reason": "grounded-good 1/3; #1 shows_use=fail, explanation_ok=fail; #3 explanation_ok=fail"
+    }
+  ]
+}
