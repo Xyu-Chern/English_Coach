@@ -2,7 +2,7 @@ import argparse
 import sys
 
 from .config import Settings
-from .errors import TranslationDemoError
+from .errors import ConfigurationError, TranslationDemoError
 from .providers.openai_compatible import OpenAICompatibleChatModel
 from .service import TranslationService
 
@@ -24,6 +24,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         settings = Settings.from_environment()
+        if settings.provider != "openai":  # e.g. a .env that selects Claude for the evaluation
+            raise ConfigurationError("The translation demo runs on an OpenAI-compatible model; "
+                                     f"unset LLM_PROVIDER (now {settings.provider!r}) to use it.")
         service = TranslationService(OpenAICompatibleChatModel(settings), settings)
         result = service.translate(text)
     except TranslationDemoError as exc:
