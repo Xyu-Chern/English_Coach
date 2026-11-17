@@ -50,7 +50,7 @@ class RetrievedChunk:
 # of the permission at embedding time. Both public reads use this same CTE.
 _LATEST_COMPLETE = """
     WITH latest_complete AS (
-        SELECT DISTINCT ON (s.source_key) b.build_id
+        SELECT DISTINCT ON (s.source_key) b.build_id, b.document_id
         FROM public.corpus_builds AS b
         JOIN public.corpus_embedding_builds AS completed USING (build_id)
         JOIN public.podcast_transcripts AS d USING (document_id)
@@ -92,6 +92,70 @@ def _search_parameters(
     return (processing_version, model, dimensions, language, language, feeds, feeds)
 
 
+def _document_scope(document_ids: tuple[UUID, ...] | None) -> list[UUID] | None:
+    if document_ids is None:
+        return None
+    if (not isinstance(document_ids, tuple) or len(document_ids) > 1000
+            or any(not isinstance(value, UUID) for value in document_ids)
+            or len(set(document_ids)) != len(document_ids)):
+        raise ValueError("document_ids must contain at most 1000 distinct UUIDs; empty means no permitted documents.")
+    return list(document_ids)
+
+
+_REGEX_SPECIAL = re.compile(r"([\\^$.|?*+()\[\]{}])")
+
+
+def literal_word_pattern(phrase: str) -> str:
+    """PostgreSQL ARE for a whole-word, case-insensitive (with ~*) phrase match.
+
+    Metacharacters are escaped so the phrase is matched as text. \\m/\\M are
+    added only next to word characters: a phrase ending in "." has no word end.
+    """
+    _bounded_text(phrase, "literal_phrase", 400)
+    pattern = _REGEX_SPECIAL.sub(r"\\\1", phrase)
+    if re.match(r"\w", phrase):
+        pattern = r"\m" + pattern
+    if re.search(r"\w$", phrase):
+        pattern += r"\M"
+    return pattern
+
+
+def count_literal_chunks(
+    conn: psycopg.Connection,
+    literal_phrase: str,
+    *,
+    model: str,
+    dimensions: int,
+    processing_version: str,
+    language: str | None = None,
+    feed_ids: tuple[int, ...] | None = None,
+    document_ids: tuple[UUID, ...] | None = None,
+) -> int:
+    """Count searchable chunks containing the phrase as whole words.
+
+    Unlike a search, this is not capped by limit, so 0 tells the caller the
+    phrase is absent from the eligible corpus, not merely outranked.
+    """
+    parameters = _search_parameters(model, dimensions, processing_version, language, feed_ids)
+    documents = _document_scope(document_ids)
+    pattern = literal_word_pattern(literal_phrase)
+    try:
+        row = conn.execute(
+            _LATEST_COMPLETE + """
+            SELECT count(DISTINCT c.chunk_id) FROM latest_complete AS b
+            JOIN public.corpus_chunks AS c USING (build_id)
+            JOIN public.corpus_embeddings AS e USING (chunk_id)
+            WHERE e.model = %s AND e.dimensions = %s
+              AND (%s::uuid[] IS NULL OR b.document_id = ANY(%s::uuid[]))
+              AND c.text ~* %s
+            """,
+            parameters + (model, dimensions, documents, documents, pattern),
+        ).fetchone()
+        return int(row[0])
+    except psycopg.Error:
+        raise CorpusStorageError("Could not count literal matches in the stored corpus.") from None
+
+
 def has_searchable_corpus(
     conn: psycopg.Connection,
     *,
@@ -100,6 +164,7 @@ def has_searchable_corpus(
     processing_version: str,
     language: str | None = None,
     feed_ids: tuple[int, ...] | None = None,
+    document_ids: tuple[UUID, ...] | None = None,
 ) -> bool:
     """Check readiness before spending a query embedding request.
 
@@ -107,6 +172,7 @@ def has_searchable_corpus(
     same approval and completion conditions after the provider call finishes.
     """
     parameters = _search_parameters(model, dimensions, processing_version, language, feed_ids)
+    documents = _document_scope(document_ids)
     try:
         with conn.cursor(row_factory=dict_row) as cursor:
             row = cursor.execute(
@@ -116,9 +182,10 @@ def has_searchable_corpus(
                     JOIN public.corpus_chunks AS c USING (build_id)
                     JOIN public.corpus_embeddings AS e USING (chunk_id)
                     WHERE e.model = %s AND e.dimensions = %s
+                      AND (%s::uuid[] IS NULL OR b.document_id = ANY(%s::uuid[]))
                 ) AS ready
                 """,
-                parameters + (model, dimensions),
+                parameters + (model, dimensions, documents, documents),
             ).fetchone()
         return bool(row["ready"])
     except psycopg.Error:
@@ -185,14 +252,21 @@ def search_chunks(
     min_similarity: float | None = None,
     language: str | None = None,
     feed_ids: tuple[int, ...] | None = None,
+    literal_phrase: str | None = None,
+    document_ids: tuple[UUID, ...] | None = None,
 ) -> tuple[RetrievedChunk, ...]:
     """Return stored chunks ordered by exact cosine similarity.
 
     With no minimum, these are nearest candidates, not verified semantic
     matches. Model, dimensions and processing version must exactly match the
-    stored profile. Permissions are checked again on every call.
+    stored profile. Permissions are checked again on every call. A literal
+    phrase restricts candidates to case-insensitive, contiguous text matches;
+    it does not change cosine scores or perform semantic fallback itself.
     """
     parameters = _search_parameters(model, dimensions, processing_version, language, feed_ids)
+    documents = _document_scope(document_ids)
+    if literal_phrase is not None:
+        _bounded_text(literal_phrase, "literal_phrase", 400)
     if type(limit) is not int or not 1 <= limit <= 10:
         raise ValueError("limit must be an integer between 1 and 10.")
     if min_similarity is not None and (
@@ -211,6 +285,8 @@ def search_chunks(
                     JOIN public.corpus_chunks AS c USING (build_id)
                     JOIN public.corpus_embeddings AS e USING (chunk_id)
                     WHERE e.model = %s AND e.dimensions = %s
+                      AND (%s::uuid[] IS NULL OR b.document_id = ANY(%s::uuid[]))
+                      AND (%s::text IS NULL OR strpos(lower(c.text), lower(%s::text)) > 0)
                     ORDER BY similarity DESC, c.chunk_id
                     LIMIT %s
                 )
@@ -234,7 +310,8 @@ def search_chunks(
                 WHERE (%s::double precision IS NULL OR r.similarity >= %s)
                 ORDER BY r.similarity DESC, r.chunk_id
                 """,
-                parameters + (encoded_vector, model, dimensions, limit, min_similarity, min_similarity),
+                parameters + (encoded_vector, model, dimensions, documents, documents, literal_phrase, literal_phrase,
+                              limit, min_similarity, min_similarity),
             ).fetchall()
         return tuple(_retrieved_chunk(row) for row in rows)
     except psycopg.Error:
