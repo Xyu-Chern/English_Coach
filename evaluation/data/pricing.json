@@ -1,0 +1,20 @@
+{
+  "as_of": "2026-11-16 UTC",
+  "currency": "USD",
+  "basis": "standard published API list price per million tokens; estimated, not invoice; corpus preparation excluded; no request sets prompt caching, so cache writes are not priced",
+  "models": {
+    "gpt-5.4-mini-2026-03-17": {"input": 0.75, "cached_input": 0.075, "output": 4.5},
+    "claude-haiku-5-5": {
+      "input": 0.10, "cached_input": 0.01, "output": 0.50,
+      "long_prompt": {"above_input_tokens": 100000, "input": 0.50, "cached_input": 0.05, "output": 2.50}
+    },
+    "claude-sonnet-5-5": {"input": 2.0, "cached_input": 0.10, "output": 10.0}
+  },
+  "embedding": {"model": "text-embedding-3-small", "usd_per_million": 0.02},
+  "sources": {
+    "gpt-5.4-mini-2026-03-17": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+    "claude-haiku-5-5": "https://platform.claude.com/docs/en/about-claude/pricing (Model pricing; Long context pricing: a prompt over 100,000 tokens, cache reads and writes included, is priced on the second card)",
+    "claude-sonnet-5-5": "https://platform.claude.com/docs/en/about-claude/pricing (Model pricing; cache hits are 0.05x input)",
+    "text-embedding-3-small": "https://developers.openai.com/api/docs/models/text-embedding-3-small"
+  }
+}

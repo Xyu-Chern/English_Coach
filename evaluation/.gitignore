@@ -1,0 +1,11 @@
+.local
+# Run results stay local, except the published report of the submission run.
+results/*
+!results/submission/
+results/submission/*
+!results/submission/report/
+__pycache__/
+*.py[cod]
+*.dump
+*.f32
+*.f32.gz
