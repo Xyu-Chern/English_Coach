@@ -18,7 +18,7 @@ from psycopg import Connection, Error as PsycopgError
 from ..config import _read_env_file
 from ..providers.podcast_index import PodcastIndexClient, PodcastIndexCredentials, PodcastIndexError
 from ..providers.changelog_transcripts import (
-    CHANGELOG_FEED_ID, ChangelogTranscriptCatalogError, published_episode_numbers,
+    CHANGELOG_SHOWS, ChangelogTranscriptCatalogError, published_episode_numbers,
 )
 from ..providers.podcast_transcripts import (
     PodcastTranscriptError,
@@ -219,10 +219,10 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
                 defer_all_feeds(conn, seconds=max(delay, exc.retry_after_seconds or 0))
                 return result  # Persist provider-wide cooldown across cron/container restarts.
             published = None
-            if feed_id == CHANGELOG_FEED_ID:
+            if feed_id in CHANGELOG_SHOWS:
                 result.catalog_calls = 1
                 try:
-                    published = published_episode_numbers()
+                    published = published_episode_numbers(feed_id)
                 except ChangelogTranscriptCatalogError:
                     result.status, result.catalog_failures = "failed", 1
                     schedule_feed(conn, feed_id, now + timedelta(seconds=RETRY_SECONDS))
