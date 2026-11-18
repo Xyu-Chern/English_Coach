@@ -1,7 +1,7 @@
 """Small, read-only Podcast Index adapter; independent of the translation model.
 
-Each method makes one bounded request: up to ten search results or 200 episodes
-from a selected feed. There is no pagination, retry loop, or index crawler.
+Each method makes one bounded request: up to ten search results, 200 recent
+episodes, or an explicitly requested 1000-episode archive. No pagination or retries.
 """
 
 import hashlib
@@ -24,6 +24,7 @@ from ..config import _read_env_file
 BASE_URL = "https://api.podcastindex.org/api/1.0"  # Send credentials only to this API.
 MAX_RESULTS = 10  # Local exploration limit, not the upstream API's maximum.
 MAX_EPISODE_RESULTS = 200  # A bounded page from one explicitly selected feed.
+MAX_ARCHIVE_RESULTS = 1000  # Upstream /episodes/byfeedid maximum; explicit backfill only.
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # Bound memory used by an external response.
 TIMEOUT_SECONDS = 15  # Timeout for blocking network operations; not an overall deadline.
 
@@ -132,7 +133,23 @@ class PodcastIndexClient:
         if type(limit) is not int or not 1 <= limit <= maximum:
             raise ValueError(f"limit must be an integer from 1 to {maximum}.")
 
-    def _get(self, endpoint: str, params: dict[str, str | int], records_key: str) -> dict[str, Any]:
+    def historical_episodes_by_feed_id(self, feed_id: int, *, limit: int = 1000) -> dict[str, Any]:
+        """Request one archive page; no cursor or guarantee of complete older history.
+
+        The official API spec permits max <=1000 and only a `since` filter:
+        https://podcastindex-org.github.io/docs-api/pi_api.json
+        Keep ordinary refreshes at their smaller response/request limits.
+        """
+        if type(feed_id) is not int or feed_id <= 0:
+            raise ValueError("feed_id must be one positive integer.")
+        self._validate_limit(limit, maximum=MAX_ARCHIVE_RESULTS)
+        return self._get("/episodes/byfeedid", {"id": feed_id, "max": limit}, "items",
+                         max_response_bytes=8 * 1024 * 1024)
+
+    def _get(
+        self, endpoint: str, params: dict[str, str | int], records_key: str,
+        *, max_response_bytes: int = MAX_RESPONSE_BYTES,
+    ) -> dict[str, Any]:
         timestamp = str(int(time.time()))  # UTC Unix seconds, generated for each request.
         credentials = self._credentials
         material = credentials.api_key + credentials.api_secret + timestamp
@@ -150,7 +167,7 @@ class PodcastIndexClient:
         )
         try:
             with build_opener(_NoRedirect()).open(request, timeout=TIMEOUT_SECONDS) as response:
-                raw = response.read(MAX_RESPONSE_BYTES + 1)  # One extra byte detects overflow.
+                raw = response.read(max_response_bytes + 1)  # One extra byte detects overflow.
         except HTTPError as exc:
             # No retry, including 401/403/429; don't expose upstream text or request headers.
             code = exc.code
@@ -162,8 +179,8 @@ class PodcastIndexClient:
             ) from None
         except (URLError, OSError, HTTPException):
             raise PodcastIndexError("Could not read the Podcast Index response; no retry was made.") from None
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise PodcastIndexError("Podcast Index response exceeded the 2 MiB limit.")
+        if len(raw) > max_response_bytes:
+            raise PodcastIndexError("Podcast Index response exceeded its bounded size limit.")
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError, RecursionError):

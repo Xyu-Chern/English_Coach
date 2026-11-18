@@ -19,6 +19,7 @@ COPY corpus/ /app/translation_agent_demo/corpus/
 COPY storage/ /app/translation_agent_demo/storage/
 COPY jobs/ /app/translation_agent_demo/jobs/
 COPY tools/ /app/translation_agent_demo/tools/
+COPY agents/ /app/translation_agent_demo/agents/
 COPY --chmod=0600 docker/podcast-sync.crontab /etc/crontabs/root
 
 # Alpine provides BusyBox crond. The schedule, not container startup, starts API work.
