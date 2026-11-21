@@ -6,18 +6,19 @@ verified, and today's source rights are re-checked.
 
 The chat model is OpenAI's pinned snapshot by default; LLM_PROVIDER=anthropic runs Claude
 with LLM_MODEL as given (Claude ids such as claude-haiku-5-5 are complete without a date).
-Query embeddings stay on OpenAI either way: the frozen corpus vectors were made with them.
+Query embeddings must match the selected snapshot's model and dimension.
 """
 
 import hashlib
 import json
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from translation_agent_demo.config import Settings
+from translation_agent_demo.config import GOOGLE_BASE_URL, Settings, environment_values
 from translation_agent_demo.providers import chat_model
-from translation_agent_demo.providers.openai_embeddings import OpenAIEmbeddingClient, OpenAIEmbeddingSettings
+from translation_agent_demo.providers.embedding_protocol import EmbeddingProvider
+from translation_agent_demo.providers.embeddings import embedding_client
 from translation_agent_demo.storage.postgres import PostgresSettings, connect_database
 
 from .freeze import verify_snapshot
@@ -30,14 +31,18 @@ SNAPSHOT_DIR = Path(__file__).resolve().parent / ".local/snapshots/corpus-202611
 SNAPSHOT_SCHEMA = "evaluation_snapshot_v2"
 
 
+def configured_snapshot_dir() -> Path:
+    return Path(environment_values().get("EVAL_SNAPSHOT_DIR") or SNAPSHOT_DIR).resolve()
+
+
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @dataclass
 class LiveEnvironment:
-    snapshot_dir: Path = SNAPSHOT_DIR
-    schema: str = SNAPSHOT_SCHEMA
+    snapshot_dir: Path = field(default_factory=configured_snapshot_dir)
+    schema: str = field(default_factory=lambda: environment_values().get("EVAL_SNAPSHOT_SCHEMA") or SNAPSHOT_SCHEMA)
 
     def __post_init__(self):
         self.manifest = json.loads((self.snapshot_dir / "manifest.json").read_text())
@@ -58,7 +63,8 @@ class LiveEnvironment:
                     "effort": self.settings.effort, "temperature": None, "max_completion_tokens": CLAUDE_MAX_TOKENS,
                     "max_retries": self.settings.max_retries}
         else:
-            chat = {"provider": "openai", "base_url": PROVIDER, "model": MODEL_SNAPSHOT, "effort": None,
+            chat = {"provider": self.settings.provider, "base_url": self.settings.base_url,
+                    "model": self.settings.model if self.settings.provider == "google" else MODEL_SNAPSHOT, "effort": None,
                     "temperature": 0, "max_completion_tokens": MAX_COMPLETION_TOKENS, "max_retries": 0}
         return {**chat, "timeout_seconds": self.settings.timeout_seconds,
                 "snapshot_id": self.manifest["snapshot_id"], "snapshot_schema": self.schema,
@@ -72,9 +78,12 @@ class LiveEnvironment:
         if self.claude:
             if not self.settings.model.startswith("claude-") or not self.settings.api_key:
                 raise SystemExit("Set LLM_MODEL to a Claude model id (e.g. claude-haiku-5-5) and ANTHROPIC_API_KEY.")
+        elif self.settings.provider == "google":
+            if self.settings.base_url != GOOGLE_BASE_URL or not self.settings.api_key:
+                raise SystemExit("Set GEMINI_API_KEY for Google chat.")
         elif self.settings.model != MODEL or self.settings.base_url != PROVIDER or not self.settings.api_key:
             raise SystemExit(f"Set the OpenAI provider with LLM_MODEL={MODEL} and an API key.")
-        self.embeddings()  # fails here, before any paid call, when no OpenAI embedding key is configured
+        self.embeddings()  # validate the embedding space before any model call
         self.database = PostgresSettings.from_environment()
         with connect_database(self.database) as connection:
             verified = verify_snapshot(self.snapshot_dir, live_conn=connection)
@@ -86,10 +95,15 @@ class LiveEnvironment:
         """Both systems' chat model: Claude as configured, or the pinned OpenAI snapshot."""
         if self.claude:
             return chat_model(self.settings, max_output_tokens=CLAUDE_MAX_TOKENS)
-        return chat_model(replace(self.settings, model=MODEL_SNAPSHOT), max_output_tokens=MAX_COMPLETION_TOKENS)
+        settings = self.settings if self.settings.provider == "google" else replace(self.settings, model=MODEL_SNAPSHOT)
+        return chat_model(settings, max_output_tokens=MAX_COMPLETION_TOKENS)
 
-    def embeddings(self) -> OpenAIEmbeddingClient:
-        return OpenAIEmbeddingClient(OpenAIEmbeddingSettings.from_environment())
+    def embeddings(self) -> EmbeddingProvider:
+        provider = embedding_client()
+        profile = self.manifest["profile"]
+        if (provider.model, provider.dimensions) != (profile["model"], profile["dimensions"]):
+            raise ValueError("EMBEDDING_PROVIDER does not match the selected snapshot; select a matching EVAL_SNAPSHOT_DIR.")
+        return provider
 
     @contextmanager
     def store(self):

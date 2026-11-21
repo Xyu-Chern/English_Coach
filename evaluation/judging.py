@@ -53,6 +53,8 @@ class JudgeConfig:
 def judge_config(values: Mapping[str, str]) -> JudgeConfig:
     provider = choice(values, "JUDGE_PROVIDER", PROVIDERS, "openai")
     model = values.get("JUDGE_MODEL", "").strip()
+    if provider == "google" and not model:
+        raise ConfigurationError("Set JUDGE_MODEL for JUDGE_PROVIDER=google.")
     if provider == "anthropic" and not model:
         raise ConfigurationError("Set JUDGE_MODEL (for example claude-sonnet-5-5) for JUDGE_PROVIDER=anthropic.")
     effort = choice(values, "JUDGE_EFFORT", EFFORTS) if provider == "anthropic" else None

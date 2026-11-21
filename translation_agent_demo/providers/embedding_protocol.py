@@ -24,7 +24,7 @@ class EmbeddingBatch:
     model: str
     dimensions: int
     vectors: tuple[tuple[float, ...], ...] = field(repr=False)
-    input_tokens: int
+    input_tokens: int | None
 
 
 class EmbeddingProvider(Protocol):

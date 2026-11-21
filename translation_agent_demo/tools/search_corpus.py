@@ -11,6 +11,7 @@ from psycopg.pq import TransactionStatus
 
 from ..corpus.chunking import ChunkingSettings
 from ..providers.embedding_protocol import EmbeddingError, EmbeddingProvider
+from ..providers.embeddings import embedding_client
 from ..storage.postgres import CorpusStorageError
 from ..storage.retrieval import count_literal_chunks, has_searchable_corpus, search_chunks
 
@@ -42,7 +43,7 @@ def search_corpus(
     args: SearchCorpusArgs,
     *,
     conn: Connection,
-    embeddings: EmbeddingProvider,
+    embeddings: EmbeddingProvider | None = None,
     processing_version: str = ChunkingSettings().processing_version,
 ) -> SearchCorpusResult:
     """Embed one query and retrieve candidates; dependencies stay server-side.
@@ -55,6 +56,11 @@ def search_corpus(
         raise TypeError("args must be a validated SearchCorpusArgs instance.")
     if not conn.autocommit or conn.info.transaction_status != TransactionStatus.IDLE:
         raise SearchCorpusError("storage_unavailable", "Search requires an idle autocommit connection.")
+    if embeddings is None:
+        try:
+            embeddings = embedding_client()
+        except EmbeddingError:
+            raise SearchCorpusError("embedding_unavailable", "Check the embedding provider configuration.") from None
     profile = {"model": embeddings.model, "dimensions": embeddings.dimensions,
                "processing_version": processing_version}
     if args.document_ids == []:

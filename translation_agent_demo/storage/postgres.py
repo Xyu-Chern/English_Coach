@@ -119,6 +119,7 @@ def initialize_schema(conn: psycopg.Connection) -> None:
                 "004_corpus_embeddings.sql", "005_podcast_feed_reviews.sql",
                 "006_corpus_observations.sql", "007_corpus_markdown.sql",
                 "008_transcript_review_scope.sql",
+                "009_publisher_episode_ids.sql",
             )
         ]
         for sql in migrations:

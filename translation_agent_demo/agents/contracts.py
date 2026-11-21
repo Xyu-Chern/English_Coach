@@ -130,7 +130,7 @@ class SearchCorpusResult(_Model):
     model: str
     dimensions: int
     processing_version: str
-    input_tokens: int = Field(ge=0)
+    input_tokens: int | None = Field(ge=0)
     hits: tuple[CorpusSearchHit, ...]
     search_mode: Literal["literal", "semantic_fallback", "semantic"] | None = None
     literal_candidate_count: int | None = Field(default=None, ge=0)

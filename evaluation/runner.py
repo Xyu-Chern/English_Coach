@@ -56,8 +56,10 @@ SOURCES = sorted([*(str(p.relative_to(ROOT)) for p in (ROOT / "translation_agent
                                                          "recording", "freeze", "tasks", "costs")),
                   "evaluation/data/tasks.jsonl", "evaluation/data/pricing.json", "translation_agent_demo/config.py",
                   "translation_agent_demo/providers/anthropic_chat.py",
+                  "translation_agent_demo/providers/google_chat.py",
                   "translation_agent_demo/providers/openai_compatible.py",
                   "translation_agent_demo/providers/openai_embeddings.py",
+                  "translation_agent_demo/providers/embeddings.py", "translation_agent_demo/providers/google_embeddings.py",
                   "translation_agent_demo/storage/postgres.py", "translation_agent_demo/storage/retrieval.py",
                   "translation_agent_demo/tools/search_corpus.py"])
 CODE_PATHS = ("translation_agent_demo", "evaluation")  # what code.diff and the untracked hashes cover

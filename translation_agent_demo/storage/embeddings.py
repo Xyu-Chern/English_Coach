@@ -116,7 +116,7 @@ def save_embeddings(
     _validate_profile(batch.model, batch.dimensions)
     if not isinstance(batch.vectors, tuple) or len(batch.vectors) != len(chunks):
         raise ValueError("The embedding batch must contain one vector per chunk.")
-    if type(batch.input_tokens) is not int or batch.input_tokens < 0:
+    if batch.input_tokens is not None and (type(batch.input_tokens) is not int or batch.input_tokens < 0):
         raise ValueError("Embedding input_tokens must be a nonnegative integer.")
     for chunk in chunks:
         if (

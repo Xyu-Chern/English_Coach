@@ -43,10 +43,11 @@ def main() -> None:
     args = arguments().parse_args()
     run_dir = args.results / args.run
     if args.command == "tasks":
-        raise SystemExit(0 if check_tasks() else 1)
+        raise SystemExit(0 if check_tasks(args.task_file) else 1)
     if args.command in ("run", "all"):
-        run(run_dir, select_tasks(args.tasks), repeats=args.repeats, workers=args.workers, max_new=args.max_new,
-            prepare_only=args.prepare_only, systems=select_systems(args.systems))
+        run(run_dir, select_tasks(args.tasks, args.task_file), repeats=args.repeats, workers=args.workers,
+            max_new=args.max_new, prepare_only=args.prepare_only, systems=select_systems(args.systems),
+            task_file=args.task_file)
     if args.command in ("grade", "all"):
         grade(run_dir, args.judge_workers, args.prepare_only)
     if args.prepare_only:
@@ -63,6 +64,8 @@ def arguments() -> argparse.ArgumentParser:
     parser.add_argument("--run", default=DEFAULT_RUN, help=f"run directory under --results (default {DEFAULT_RUN})")
     parser.add_argument("--results", type=Path, default=RESULTS, help="results root (default evaluation/results)")
     parser.add_argument("--tasks", help="run only these task ids (comma-separated)")
+    parser.add_argument("--task-file", type=Path, default=TASKS,
+                        help="JSONL for tasks/run/all; later stages read the path from the run manifest")
     parser.add_argument("--systems", help="run only these systems (comma-separated: baseline, agent; default both)")
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS, help="runs per task (default 3)")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="units run in parallel (default 6)")
@@ -75,15 +78,15 @@ def arguments() -> argparse.ArgumentParser:
 
 
 # ------------------------------------------------------------------ commands, in flow order
-def check_tasks() -> bool:
+def check_tasks(task_file: Path = TASKS) -> bool:
     """tasks.jsonl meets the assignment's minimums."""
-    summary = summarize(load_tasks(TASKS))
-    print(json.dumps({"file": TASKS.name, **summary}, ensure_ascii=False))
+    summary = summarize(load_tasks(task_file))
+    print(json.dumps({"file": task_file.name, **summary}, ensure_ascii=False))
     return not summary["problems"]
 
 
 def run(run_dir: Path, tasks: list[EvalTask], *, repeats: int, workers: int, max_new: int | None,
-        prepare_only: bool, environment=None, systems: tuple[str, ...] | None = None) -> None:
+        prepare_only: bool, environment=None, systems: tuple[str, ...] | None = None, task_file: Path = TASKS) -> None:
     """Every pending unit in one process. environment defaults to the live models and snapshot."""
     from .live import LiveEnvironment
     from .runner import PairAttempt, RunPlan, Runner, git_state
@@ -92,7 +95,7 @@ def run(run_dir: Path, tasks: list[EvalTask], *, repeats: int, workers: int, max
     systems = systems or select_systems(None)
     git, diff = git_state()
     plan = RunPlan(tasks, repeats=repeats, workers=workers)
-    manifest = run_manifest(environment, git)
+    manifest = run_manifest(environment, git, task_file)
     if prepare_only:
         runner = Runner(plan, run_dir, None, manifest, code_diff=diff, systems=systems)
         runner.prepare()
@@ -112,10 +115,14 @@ def grade(run_dir: Path, workers: int, prepare_only: bool, corpus: Corpus | None
     """Judge every attempt of the run into <run>/grades and print the judge's list-price cost."""
     from translation_agent_demo.config import Settings
     from .grader import grade_run
-    from .live import SNAPSHOT_DIR
+    from .live import configured_snapshot_dir
 
     tasks = {t.id: t for t in planned_tasks(run_dir)}
-    corpus = corpus or Corpus(SNAPSHOT_DIR / "corpus.json.gz")
+    if corpus is None:
+        corpus = Corpus(configured_snapshot_dir() / "corpus.json.gz")
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        if corpus.sha256 != manifest["environment"]["corpus_sha256"]:
+            raise SystemExit("The selected corpus differs from the snapshot used for this run.")
     settings = None if prepare_only else Settings.from_environment()  # only a judge call needs the chat settings
     summary = grade_run(run_dir, tasks, corpus, settings, workers=workers, prepare_only=prepare_only)
     if summary:
@@ -137,9 +144,9 @@ def review(run_dir: Path) -> None:
 
 
 # ------------------------------------------------------------------ helpers
-def select_tasks(ids: str | None) -> list[EvalTask]:
+def select_tasks(ids: str | None, task_file: Path = TASKS) -> list[EvalTask]:
     """All tasks, or the named ones in file order."""
-    tasks = load_tasks(TASKS)
+    tasks = load_tasks(task_file)
     if not ids:
         return tasks
     wanted = {i.strip() for i in ids.split(",") if i.strip()}
@@ -160,15 +167,17 @@ def select_systems(names: str | None) -> tuple[str, ...]:
     return tuple(s for s in SYSTEMS if s in wanted) if wanted else SYSTEMS
 
 
-def run_manifest(environment, git: dict) -> dict:
+def run_manifest(environment, git: dict, task_file: Path = TASKS) -> dict:
     """What a run is made of: the models and corpus, the judge, the code and the task file's sha256.
 
     The runner adds the systems, repeats, seed, workers and the tasks themselves."""
     from .judging import current_judge
     from .runner import file_sha256, source_hashes
 
+    path = task_file.resolve()
+    label = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
     return {"environment": environment.identity(), "judge": asdict(current_judge()), "git": git,
-            "sources": source_hashes(), "task_file": str(TASKS.relative_to(ROOT)), "tasks_sha256": file_sha256(TASKS)}
+            "sources": source_hashes(), "task_file": label, "tasks_sha256": file_sha256(path)}
 
 
 def planned_tasks(run_dir: Path) -> list[EvalTask]:
@@ -180,10 +189,11 @@ def planned_tasks(run_dir: Path) -> list[EvalTask]:
     path = run_dir / "manifest.json"
     manifest = json.loads(path.read_text()) if path.exists() else {}
     recorded = manifest.get("tasks_sha256")
-    if recorded and recorded != file_sha256(TASKS):
-        raise SystemExit(f"{TASKS.name} changed since this run was made (sha256 {recorded[:12]} in its manifest); "
+    task_file = ROOT / manifest.get("task_file", TASKS)
+    if recorded and recorded != file_sha256(task_file):
+        raise SystemExit(f"{task_file.name} changed since this run was made (sha256 {recorded[:12]} in its manifest); "
                          "restore the file or make a new run.")
-    tasks = load_tasks(TASKS)
+    tasks = load_tasks(task_file)
     planned = manifest.get("tasks")
     return [t for t in tasks if t.id in planned] if planned else tasks
 

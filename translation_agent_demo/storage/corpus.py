@@ -38,11 +38,13 @@ class StoredTranscript(PodcastTranscript):
     license_evidence: dict[str, Any] = field(repr=False)
 
 
-def _source_key(feed_id: int, episode_id: int) -> str:
+def _source_key(feed_id: int, episode_id: int, namespace: str = "podcast_index") -> str:
     for value in (feed_id, episode_id):
         if type(value) is not int or not 0 < value < 2**63:
             raise ValueError("feed_id and episode_id must be positive bigint integers.")
-    return f"podcast_index:{feed_id}:{episode_id}"
+    if namespace not in {"podcast_index", "changelog"}:
+        raise ValueError("Unknown episode ID namespace.")
+    return f"{namespace}:{feed_id}:{episode_id}"
 
 
 def save_transcript(
@@ -51,6 +53,7 @@ def save_transcript(
     *,
     language: str | None = None,
     license_evidence: dict[str, Any] | None = None,
+    id_namespace: Literal["podcast_index", "changelog"] = "podcast_index",
 ) -> SaveTranscriptResult:
     """Upsert source metadata and retain one immutable version per distinct text.
 
@@ -63,7 +66,7 @@ def save_transcript(
     """
     if not isinstance(transcript, PodcastTranscript):
         raise ValueError("transcript must be a PodcastTranscript.")
-    source_key = _source_key(transcript.feed_id, transcript.episode_id)
+    source_key = _source_key(transcript.feed_id, transcript.episode_id, id_namespace)
     if not isinstance(transcript.episode_title, str):
         raise ValueError("Transcript episode title must be a string.")
     if not isinstance(transcript.transcript_url, str) or not 1 <= len(transcript.transcript_url) <= 2048:

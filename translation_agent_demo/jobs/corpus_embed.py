@@ -12,7 +12,7 @@ from psycopg.pq import TransactionStatus
 from ..config import _read_env_file
 from ..corpus.chunking import ChunkingSettings
 from ..providers.embedding_protocol import EmbeddingError, EmbeddingProvider
-from ..providers.openai_embeddings import OpenAIEmbeddingClient, OpenAIEmbeddingSettings
+from ..providers.embeddings import embedding_client
 from ..storage.embeddings import pending_embedding_chunks, save_embeddings
 from ..storage.postgres import CorpusStorageError, PostgresSettings, connect_database
 
@@ -26,7 +26,7 @@ class EmbedResult:
     selected_chunks: int = 0
     inserted: int = 0
     completed_builds: int = 0
-    input_tokens: int = 0
+    input_tokens: int | None = 0
 
 
 def embed_corpus(
@@ -77,7 +77,7 @@ def run_once() -> EmbedResult:
         raise ValueError("CORPUS_EMBED_ENABLED must be true or false.")
     if enabled == "false":
         return EmbedResult(status="disabled")
-    embeddings = OpenAIEmbeddingClient(OpenAIEmbeddingSettings.from_environment())
+    embeddings = embedding_client()
     with connect_database(PostgresSettings.from_environment()) as conn:
         return embed_corpus(conn, embeddings)
 

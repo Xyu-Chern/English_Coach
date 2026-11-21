@@ -48,6 +48,16 @@ class CommandLineTests(unittest.TestCase):
     def test_a_run_without_a_manifest_uses_every_task(self):
         self.assertEqual([t.id for t in cli.planned_tasks(self.run_dir)], [t.id for t in load_tasks()])
 
+    def test_alternate_task_file_is_used_for_the_run_and_later_review(self):
+        task_file = TASKS.with_name("tasks.zh.jsonl")
+        tasks = cli.select_tasks("zh-train-door", task_file)
+        with redirect_stdout(io.StringIO()):
+            cli.run(self.run_dir, tasks, repeats=3, workers=1, max_new=None, prepare_only=True,
+                    environment=OfflineEnvironment(), task_file=task_file)
+        self.assertEqual(cli.planned_tasks(self.run_dir), tasks)
+        manifest = json.loads((self.run_dir / "manifest.json").read_text())
+        self.assertEqual(manifest["tasks_sha256"], file_sha256(task_file))
+
     def test_named_tasks_come_in_file_order_and_unknown_ones_are_refused(self):
         ids = [t.id for t in load_tasks()]
         self.assertEqual([t.id for t in cli.select_tasks(f"{ids[2]},{ids[0]}")], [ids[0], ids[2]])

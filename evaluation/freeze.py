@@ -389,7 +389,7 @@ def main() -> int:
         command.add_argument("--root", type=Path, default=DEFAULT_ROOT)
         command.add_argument("--env-file", type=Path, default=Path(__file__).resolve().parents[1] / "translation_agent_demo" / ".env")
     create.add_argument("--manifests", type=Path, default=DEFAULT_MANIFESTS)
-    create.add_argument("--model", default="text-embedding-3-small")
+    create.add_argument("--model", help="default: model selected by EMBEDDING_PROVIDER")
     create.add_argument("--dimensions", type=int, default=1536)
     create.add_argument("--processing-version", default=DEFAULT_PROCESSING_VERSION)
     verify.add_argument("--check-live-rights", action="store_true")
@@ -397,9 +397,11 @@ def main() -> int:
     try:
         _snapshot_id(args.snapshot_id)
         if args.command == "create":
+            from translation_agent_demo.providers.embeddings import embedding_model
             with connect_database(PostgresSettings.from_environment(args.env_file)) as conn:
                 result = create_snapshot(conn, args.snapshot_id, root=args.root, manifests=args.manifests,
-                                         model=args.model, dimensions=args.dimensions, processing_version=args.processing_version)
+                                         model=args.model or embedding_model(args.env_file), dimensions=args.dimensions,
+                                         processing_version=args.processing_version)
         elif args.check_live_rights:
             with connect_database(PostgresSettings.from_environment(args.env_file)) as conn:
                 result = verify_snapshot(args.root / args.snapshot_id, live_conn=conn)

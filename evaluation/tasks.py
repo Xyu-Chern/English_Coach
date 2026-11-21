@@ -18,7 +18,7 @@ Fields, in file order:
                  must say or do, each explicit constraint, and that each expression has a real
                  podcast quote that shows this use (for unanswerable tasks: decline and why, and
                  offer nothing). A summary of `intended` and the judge's checks; no judge reads it
-    language     the language of `question`: "ko" or "en"
+    language     the language of `question`: "ko", "en" or "zh"
     group        regular | edge (unusual input) | unanswerable (must be declined)
     input_type   regular tasks only, what the learner asks for:
                      specific  a specific message to say (idiom tasks are specific too)
@@ -89,7 +89,7 @@ class EvalTask:
     question: str
     question_en: str
     rubric: tuple[str, ...]
-    language: Literal["ko", "en"]
+    language: Literal["ko", "en", "zh"]
     group: Literal["regular", "edge", "unanswerable"]
     input_type: str | None
     condition: str
@@ -114,7 +114,7 @@ class EvalTask:
         object.__setattr__(self, "rubric", tuple(self.rubric))
         if not self.rubric or not all(text(item) for item in self.rubric):
             raise ValueError(f"{self.id}: rubric must hold at least one nonblank check.")
-        if self.language not in ("ko", "en") or self.group not in GROUPS:
+        if self.language not in ("ko", "en", "zh") or self.group not in GROUPS:
             raise ValueError(f"{self.id}: unknown language {self.language!r} or group {self.group!r}.")
         if self.expect not in TYPE_OF_EXPECT:
             raise ValueError(f"{self.id}: unknown expectation {self.expect!r}.")
@@ -135,7 +135,7 @@ class EvalTask:
 def load_tasks(path: Path = TASKS) -> list[EvalTask]:
     """Every task in the file, validated; unknown or missing fields and duplicate ids are refused."""
     tasks = []
-    for number, line in enumerate(Path(path).read_text().splitlines(), 1):
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
         try:

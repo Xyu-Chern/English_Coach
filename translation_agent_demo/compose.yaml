@@ -60,6 +60,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - ./storage/migrations/009_publisher_episode_ids.sql:/docker-entrypoint-initdb.d/009_publisher_episode_ids.sql:ro
       - type: bind
         source: ./docker/010_seed_transcript.sql
         target: /docker-entrypoint-initdb.d/010_seed_transcript.sql
@@ -96,6 +97,8 @@ services:
       PODCAST_SYNC_ENABLED: ${PODCAST_SYNC_ENABLED:-true}
       CORPUS_BUILD_ENABLED: ${CORPUS_BUILD_ENABLED:-true}
       CORPUS_EMBED_ENABLED: ${CORPUS_EMBED_ENABLED:-false}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_EMBEDDING_API_KEY: ${OPENAI_EMBEDDING_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_EMBEDDING_TIMEOUT_SECONDS: ${OPENAI_EMBEDDING_TIMEOUT_SECONDS:-30}
