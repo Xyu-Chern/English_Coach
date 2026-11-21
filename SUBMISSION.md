@@ -1,5 +1,12 @@
 # Expression Coach: Baseline vs Agent
 
+### Team
+
+| Name | NetID |
+|---|---|
+| Taehyun Lee | taehyun2 |
+| Xyu Chern | xyuchern |
+
 ### Context
 
 The coach is for people whose second language is English, such as Korean and Chinese speakers.
@@ -13,7 +20,7 @@ If the coach cannot serve a request (a source outside the corpus, not about Engl
 |---|---|
 | `tasks.jsonl` | `evaluation/data/tasks.jsonl`: 50 tasks (37 regular, 6 edge, 7 unanswerable). This set is written in Korean; each task has `type` (`rubric` or `unanswerable`), `question`, `question_en` and `rubric`. |
 | Eval script | `evaluation/eval.py`: `python -m evaluation.eval all` runs both systems on every task 3 times, grades them and writes the report. |
-| Results table with pass@3 and pass^3 | [Results](#results) below; full tables in `evaluation/results/submission/report/results.md` |
+| Results table with pass@3 and pass^3 | [Results](#results) below |
 | One paragraph on the failure | [Failure](#failure) below |
 
 ### Baseline vs Agent
