@@ -546,6 +546,10 @@ const defaultServer = isAndroid ? onlineSite : location.origin;
 function apiBase() {
   return read("server", "") || defaultServer;
 }
+function privateServer(address) {
+  return Boolean(address && address !== onlineSite && address !== defaultServer) ||
+    (!isAndroid && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && address === defaultServer);
+}
 function failedMessage() {
   return {
     offline: T(
@@ -636,7 +640,7 @@ async function ask(resumeId = null) {
       return;
     }
     const headers = { "Content-Type": "application/json" };
-    const code = read("access:"+apiBase(), "");
+    const code = privateServer(apiBase()) && read("access:" + apiBase(), "");
     if (code) headers["X-Coach-Code"] = code;
     const prior = turns[turns.length - 1];
     const followup =
@@ -685,7 +689,7 @@ async function ask(resumeId = null) {
       throw new Error("offline");
     if (!r.ok)
       throw new Error(
-        { 401: "pair", 403: "pair", 429: "busy", 422: "invalid" }[r.status] ||
+        { 401: privateServer(apiBase()) ? "pair" : "service", 403: "service", 429: "busy", 422: "invalid" }[r.status] ||
           "service",
       );
     const data = await r.json();
@@ -740,10 +744,10 @@ function settings() {
     esc(base) +
     '" placeholder="' +
     esc(defaultServer) +
-    '"></label><label class="field">' +
-    T("个人连接码", "연결 코드 (설정한 경우)") +
+    '"></label><label class="field" id="custom-code-field">' +
+    T("自建服务连接码", "연결 코드 (설정한 경우)") +
     '<input type="password" autocomplete="off" id="code" value="' +
-    esc(read("access:"+apiBase(), "") || "") +
+    esc(privateServer(apiBase()) ? read("access:" + apiBase(), "") : "") +
     '"></label><div class="tools"><button type="button" class="secondary" data-close>' +
     T("关闭", "닫기") +
     '</button><button class="primary">' +
@@ -759,6 +763,13 @@ function settings() {
           "iPhone에서는 Safari 공유 메뉴에서 ‘홈 화면에 추가’를 선택하세요.",
         ) +
         "</p></div>");
+  const syncCode = () => {
+    const address = new URL($("server").value || defaultServer, location.origin).origin;
+    $("custom-code-field").style.display = privateServer(address) ? "" : "none";
+    $("code").value = privateServer(address) ? read("access:" + address, "") : "";
+  };
+  syncCode();
+  $("server").addEventListener("input", () => { try { syncCode(); } catch { $("custom-code-field").style.display = "none"; } });
   if (dialog.showModal) dialog.showModal();
   else dialog.setAttribute("open", "");
 }
@@ -817,7 +828,7 @@ document.addEventListener("submit", (e) => {
       }
     }
     write("server", s ? new URL(s).origin : "");
-    write("access:"+apiBase(), $("code").value);
+    if (privateServer(apiBase())) write("access:" + apiBase(), $("code").value);
     closeSettings();
     toast(T("设置已保存", "설정을 저장했어요"));
   }

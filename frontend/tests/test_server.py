@@ -43,3 +43,13 @@ class CoachApiTests(unittest.TestCase):
             self.assertNotIn("internal details", r.text)
             self.answer.side_effect=None
             self.assertEqual(200, self.client.post("/api/search", headers={"X-Coach-Code":"test-code"}, json={"question":"hello"}).status_code)
+
+    def test_public_deployment_accepts_web_and_android_without_pairing(self):
+        with patch.dict(os.environ, {"COACH_PAIR_CODE": "old-private-code"}):
+            public = TestClient(make_app(self.answer, public_access=True), base_url="https://coach.example")
+            for origin in ("https://coach.example", "http://localhost"):
+                response = public.post("/api/search", headers={"Origin": origin}, json={"question": "hello"})
+                self.assertEqual(response.status_code, 200)
+            refused = public.post("/api/search", headers={"Origin": "https://other.invalid"}, json={"question": "hello"})
+            self.assertEqual(refused.status_code, 403)
+            self.assertEqual(self.answer.call_count, 2)

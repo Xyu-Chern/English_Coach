@@ -19,9 +19,9 @@ ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
 adb install -r frontend/android/build/PhraseRoom.apk
 ```
 
-Android 1.2 uses the Vercel origin in the app. In Settings enter your personal connection code. The backend bundle is generated from the repository root using `python -m frontend.vercel.package` in WSL. Set `RESPONSES_API_KEY` and `COACH_PAIR_CODE` as Vercel production secrets before deploying the generated directory.
+Android 1.3 uses the Vercel origin in the app. The backend bundle is generated from the repository root using `python -m frontend.vercel.package` in WSL. Set `RESPONSES_API_KEY` as a Vercel production secret before deploying the generated directory.
 
-The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Questions require the device's personal connection code. The computer can be off. Publish a new snapshot when transcripts or rights change.
+The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
 
 ## Project Owner Judgment Questions
 
@@ -48,9 +48,9 @@ ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
 adb install -r frontend/android/build/PhraseRoom.apk
 ```
 
-Android 1.2 直接访问 Vercel，在连接设置填写个人连接码。更新后端时，从仓库根目录在 WSL 运行 `python -m frontend.vercel.package`。部署生成的目录前，在 Vercel 的生产环境配置 `RESPONSES_API_KEY` 和 `COACH_PAIR_CODE`。
+Android 1.3 直接访问 Vercel，打开即可提问。更新后端时，从仓库根目录在 WSL 运行 `python -m frontend.vercel.package`。部署生成的目录前，在 Vercel 的生产环境配置 `RESPONSES_API_KEY`。
 
-Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机首次提问需要个人连接码，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
+Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
 
 ## 项目负责人判断题
 
@@ -77,9 +77,9 @@ ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
 adb install -r frontend/android/build/PhraseRoom.apk
 ```
 
-Android 1.2는 Vercel에 직접 연결한다. 연결 설정에서 개인 코드를 입력한다. WSL 저장소 루트에서 `python -m frontend.vercel.package`로 배포 파일을 만들고 Vercel 프로덕션에 `RESPONSES_API_KEY`와 `COACH_PAIR_CODE`를 설정한 뒤 배포한다.
+Android 1.3는 Vercel에 직접 연결한다. WSL 저장소 루트에서 `python -m frontend.vercel.package`로 배포 파일을 만들고 Vercel 프로덕션에 `RESPONSES_API_KEY`를 설정한 뒤 배포한다.
 
-Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 개인 연결 코드를 한 번 입력하면 컴퓨터가 꺼져 있어도 사용할 수 있다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
+Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
 ## 프로젝트 책임자 판단 질문
 

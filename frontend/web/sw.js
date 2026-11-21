@@ -1,4 +1,4 @@
-const cacheName = "phrase-room-shell-v6";
+const cacheName = "phrase-room-shell-v7";
 const assets = [
   "./",
   "./index.html",

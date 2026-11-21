@@ -15,6 +15,4 @@ os.environ["COACH_LOCAL_MODEL_DIR"] = str(
 from frontend.server import make_app
 from frontend.vercel.coach import answer
 
-if not os.environ.get("COACH_PAIR_CODE"):
-    raise RuntimeError("Set COACH_PAIR_CODE in the project settings.")
-app = make_app(answer, serve_ui=False)
+app = make_app(answer, serve_ui=False, public_access=True)

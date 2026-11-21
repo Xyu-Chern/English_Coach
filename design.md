@@ -164,7 +164,7 @@ This project is interview-ready when each in-scope claim can be supported by a d
 
 The web client and installable Android client share a bilingual interface and an offline phrase collection. A saved card and search history belong to the current device. POST /api/search accepts a question and optional context and returns learner-facing expressions with verified source details from ExpressionCoach. Credentials stay on the Python server.
 
-The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Questions require the device's personal connection code. The computer can be off. Publish a new snapshot when transcripts or rights change.
+The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
 
 ## 11. Project Owner Judgment Questions
 
@@ -342,7 +342,7 @@ flowchart TD
 
 网页和可安装的 Android 客户端共用中韩双语界面和离线表达集。收藏与学习历史保存在当前设备。POST /api/search 接收问题和可选场景，返回 ExpressionCoach 给出的表达及经过核对的字幕出处。密钥保存在 Python 服务端。
 
-Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机首次提问需要个人连接码，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
+Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
 
 ## 11. 项目负责人判断题
 
@@ -520,7 +520,7 @@ flowchart TD
 
 웹과 설치형 Android 앱은 중·한 이중 언어 화면과 오프라인 표현 모음을 공유한다. 저장한 표현과 학습 기록은 현재 기기에 보관한다. POST /api/search는 질문과 선택한 맥락을 받아 ExpressionCoach의 표현과 검증된 자막 출처를 반환한다. 키는 Python 서버에 보관한다.
 
-Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 개인 연결 코드를 한 번 입력하면 컴퓨터가 꺼져 있어도 사용할 수 있다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
+Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
 ## 11. 프로젝트 책임자 판단 질문
 

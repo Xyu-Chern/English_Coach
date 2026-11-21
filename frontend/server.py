@@ -55,7 +55,7 @@ def ask_coach(question):
         return coach.answer(question)
 
 
-def make_app(answer=ask_coach, *, serve_ui=True):
+def make_app(answer=ask_coach, *, serve_ui=True, public_access=False):
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     origin = os.environ.get("COACH_WEB_ORIGIN", "").strip()
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", *([origin] if origin else [])],
@@ -65,13 +65,14 @@ def make_app(answer=ask_coach, *, serve_ui=True):
 
     @app.post("/api/search", response_model=Reply)
     def search(body: Question, request: Request, x_coach_code: str = Header(default="")):
-        code = os.environ.get("COACH_PAIR_CODE", "")
-        if code and not hmac.compare_digest(code.encode(), x_coach_code.encode()):
-            raise HTTPException(401, "pairing_required")
-        if not code:
-            host = request.url.hostname
-            if host not in {"localhost", "127.0.0.1", "::1"}:
-                raise HTTPException(403, "pairing_required")
+        if not public_access:
+            code = os.environ.get("COACH_PAIR_CODE", "")
+            if code and not hmac.compare_digest(code.encode(), x_coach_code.encode()):
+                raise HTTPException(401, "pairing_required")
+            if not code:
+                host = request.url.hostname
+                if host not in {"localhost", "127.0.0.1", "::1"}:
+                    raise HTTPException(403, "pairing_required")
         browser_origin = request.headers.get("origin")
         if browser_origin and (urlsplit(browser_origin).netloc != request.headers.get("host")
                                and browser_origin not in {"http://localhost", origin}):
