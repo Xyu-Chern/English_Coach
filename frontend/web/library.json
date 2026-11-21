@@ -1,0 +1,194 @@
+[
+  {
+    "id": "borrow-book",
+    "title": [
+      "还书时留句话",
+      "책을 돌려줄 때"
+    ],
+    "group": "daily",
+    "keywords": "借书 还书 室友 提醒 通知 告诉我 책 도서 알려",
+    "expression": "Just let me know when you need the book back. I can give it back anytime.",
+    "key_phrase": "let me know",
+    "meaning": [
+      "你要用这本书时告诉我就好，我随时可以还。",
+      "책이 필요할 때 알려 줘. 언제든 돌려줄게."
+    ],
+    "citation": {
+      "quote": "I just wanna see if that does hack anyone's home devices; please let me know in the Slack channel or on Twitter if it does.",
+      "episode_title": "Go Time #101",
+      "episode_url": "https://changelog.com/gotime/101",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/gotime/go-time-101.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "water-glass",
+    "title": [
+      "在餐厅礼貌续水",
+      "식당에서 물 부탁하기"
+    ],
+    "group": "daily",
+    "keywords": "喝水 加水 餐厅 服务员 礼貌 点餐 물 식당",
+    "expression": "Could you bring me some more water, please?",
+    "key_phrase": "Could you",
+    "meaning": [
+      "可以麻烦你再给我倒点水吗？",
+      "물을 조금 더 주실 수 있을까요?"
+    ],
+    "citation": {
+      "quote": "[laughter] Okay, could you be on all of my calls forever, please?",
+      "episode_title": "Go Time #101",
+      "episode_url": "https://changelog.com/gotime/101",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/gotime/go-time-101.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "give-credit",
+    "title": [
+      "把功劳给搭档",
+      "동료에게 공을 돌릴 때"
+    ],
+    "group": "work",
+    "keywords": "夸奖 功劳 老师 伙伴 感谢 团队 협업 공로",
+    "expression": "Thanks! I give my partner all the credit for the drawings—she drew them.",
+    "key_phrase": "credit",
+    "meaning": [
+      "谢谢！这些图都是搭档画的，功劳要归她。",
+      "고마워요! 그림은 제 파트너가 그렸으니 그 공은 파트너에게 돌리고 싶어요."
+    ],
+    "citation": {
+      "quote": "I give Bjarne Stroustrup (the author of C++) enormous credit, because he gave the users everything they wanted; they asked for more and he gave them more, and as a result he ended up building a language that was - and it remains - a critical part of software development worldwide.",
+      "episode_title": "Go Time #100",
+      "episode_url": "https://changelog.com/gotime/100",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/gotime/go-time-100.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "ask-demo",
+    "title": [
+      "请对方演示一下",
+      "시연을 부탁할 때"
+    ],
+    "group": "work",
+    "keywords": "展示 演示 开会 看一下 示例 시연 데모",
+    "expression": "Could you share a demo with me?",
+    "key_phrase": "share a demo",
+    "meaning": [
+      "可以给我演示一下吗？",
+      "시연을 한번 보여 주실 수 있나요?"
+    ],
+    "citation": {
+      "quote": "But yeah, happy to share a demo with you as soon as we're out there.",
+      "episode_title": "The Changelog #601",
+      "episode_url": "https://changelog.com/podcast/601",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/podcast/the-changelog-601.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "defer-choice",
+    "title": [
+      "让朋友来做决定",
+      "친구에게 선택을 맡길 때"
+    ],
+    "group": "social",
+    "keywords": "选择 选项 随便 都行 决定 선택 결정",
+    "expression": "You can choose which way you wanna go.",
+    "key_phrase": "which way you wanna go",
+    "meaning": [
+      "往哪个方向走，你来选就好。",
+      "어느 쪽으로 갈지 네가 정하면 돼."
+    ],
+    "citation": {
+      "quote": "It's a decision you have to make at some point in your system, which way you wanna go.",
+      "episode_title": "Go Time #100",
+      "episode_url": "https://changelog.com/gotime/100",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/gotime/go-time-100.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "by-the-way",
+    "title": [
+      "顺带提起一件事",
+      "이야기를 덧붙일 때"
+    ],
+    "group": "social",
+    "keywords": "顺便 顺带 转话题 对了 话题 그나저나 참고",
+    "expression": "Yeah, Renovate is definitely my favorite, by the way.",
+    "key_phrase": "by the way",
+    "meaning": [
+      "对了，Renovate 绝对是我的最爱。",
+      "참, 저는 Renovate를 제일 좋아해요."
+    ],
+    "citation": {
+      "quote": "Yeah, Renovate is definitely my favorite, by the way.",
+      "episode_title": "JS Party #210",
+      "episode_url": "https://changelog.com/jsparty/210",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/jsparty/js-party-210.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "so-far",
+    "title": [
+      "说说目前的进展",
+      "지금까지의 진행 상황"
+    ],
+    "group": "work",
+    "keywords": "进度 进展 目前 顺利 报告 진행 순조",
+    "expression": "It looks pretty good so far.",
+    "key_phrase": "looks pretty good",
+    "meaning": [
+      "到目前为止，看起来挺不错。",
+      "지금까지는 꽤 괜찮아 보여요."
+    ],
+    "citation": {
+      "quote": "We're ten years in - 12 years really, from the start - and it looks pretty good.",
+      "episode_title": "Go Time #100",
+      "episode_url": "https://changelog.com/gotime/100",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/gotime/go-time-100.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  {
+    "id": "hand-floor",
+    "title": [
+      "邀请新人开口",
+      "새로 온 사람에게 말할 기회 주기"
+    ],
+    "group": "social",
+    "keywords": "邀请 读书会 加入 发言 主持 提问 질문 모임",
+    "expression": "Any questions you haven't had a chance to ask yet?",
+    "key_phrase": "questions you haven't had a chance",
+    "meaning": [
+      "还有什么问题是你没来得及问的吗？",
+      "아직 물어볼 기회가 없었던 질문이 있나요?"
+    ],
+    "citation": {
+      "quote": "Nick and/or Amelia, any nagging questions that you haven't had a chance to ask yet?",
+      "episode_title": "JS Party #211",
+      "episode_url": "https://changelog.com/jsparty/211",
+      "transcript_url": "https://raw.githubusercontent.com/thechangelog/transcripts/master/jsparty/js-party-211.md",
+      "attribution": "Changelog Media LLC",
+      "license_id": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  }
+]

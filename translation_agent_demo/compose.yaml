@@ -88,6 +88,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sync
+      args:
+        EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
     environment:
       # libpq reads PGPASSWORD without interpolating special characters into a URI.
       DATABASE_URL: postgresql://english_coach@postgres:5432/english_coach
@@ -105,6 +107,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       PODCAST_SYNC_FEED_IDS: ${PODCAST_SYNC_FEED_IDS:-542376}
+    volumes:
+      - ./.local/models:/app/translation_agent_demo/.local/models:ro
     depends_on:
       postgres:
         condition: service_healthy

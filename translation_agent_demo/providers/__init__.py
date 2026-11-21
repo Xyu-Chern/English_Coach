@@ -17,6 +17,9 @@ def chat_model(settings: Settings, *, max_output_tokens: int | None = None) -> O
     if settings.provider == "google":
         from .google_chat import GoogleChatModel
         return GoogleChatModel(settings, max_completion_tokens=max_output_tokens)
+    if settings.provider == "responses":
+        from .responses import ResponsesModel
+        return ResponsesModel(settings, max_output_tokens=max_output_tokens)
     if settings.provider == "anthropic":
         from .anthropic_chat import AnthropicChatModel  # the SDK is only needed when Claude is used
         return AnthropicChatModel(settings, max_tokens=max_output_tokens)

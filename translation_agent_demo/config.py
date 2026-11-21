@@ -9,11 +9,11 @@ from .errors import ConfigurationError
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-PROVIDERS = ("openai", "anthropic", "google")
+PROVIDERS = ("openai", "anthropic", "google", "responses")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Claude thinks adaptively before answering and its SDK retries a timed-out call (each retry may
 # be billed), so it gets a longer default; LLM_TIMEOUT_SECONDS overrides both.
-DEFAULT_TIMEOUT_SECONDS = {"openai": 30.0, "anthropic": 120.0, "google": 60.0}
+DEFAULT_TIMEOUT_SECONDS = {"openai": 30.0, "anthropic": 120.0, "google": 60.0, "responses": 120.0}
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -94,6 +94,8 @@ class Settings:
         provider = choice(values, "LLM_PROVIDER", PROVIDERS, "openai")
         if provider == "anthropic":
             base_url, api_key = _anthropic_endpoint(values)
+        elif provider == "responses":
+            base_url, api_key = values.get("RESPONSES_BASE_URL", OPENAI_BASE_URL), values.get("RESPONSES_API_KEY")
         elif provider == "google":
             base_url, api_key = GOOGLE_BASE_URL, values.get("GEMINI_API_KEY") or values.get("GOOGLE_API_KEY")
         else:
@@ -147,6 +149,8 @@ def settings_for(base: Settings, provider: str, model: str, *, effort: str | Non
     values = environment_values() if values is None else values
     if provider == "anthropic":
         base_url, api_key = _anthropic_endpoint(values)
+    elif provider == "responses":
+        base_url, api_key = values.get("RESPONSES_BASE_URL", OPENAI_BASE_URL), values.get("RESPONSES_API_KEY")
     elif provider == "google":
         base_url, api_key = GOOGLE_BASE_URL, values.get("GEMINI_API_KEY") or values.get("GOOGLE_API_KEY")
     else:

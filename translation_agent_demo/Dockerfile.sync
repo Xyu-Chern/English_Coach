@@ -1,4 +1,16 @@
-FROM python:3.13-alpine3.23
+ARG EMBEDDING_PROVIDER=openai
+FROM python:3.13-alpine3.23 AS cloud
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements.txt
+
+FROM cloud AS base-openai
+FROM cloud AS base-google
+FROM python:3.11-slim-bookworm AS base-local
+COPY --from=busybox:1.37.0-musl /bin/busybox /usr/local/bin/busybox
+COPY requirements.txt requirements-local.txt /tmp/
+RUN busybox crond --help && pip install --no-cache-dir -r /tmp/requirements-local.txt
+
+FROM base-${EMBEDDING_PROVIDER} AS worker
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -7,8 +19,6 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=UTC
 
 WORKDIR /app
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements.txt
 # Cache the public tokenizer vocabulary at build time; corpus jobs run locally.
 RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
@@ -23,4 +33,4 @@ COPY agents/ /app/translation_agent_demo/agents/
 COPY --chmod=0600 docker/podcast-sync.crontab /etc/crontabs/root
 
 # Alpine provides BusyBox crond. The schedule, not container startup, starts API work.
-CMD ["crond", "-f", "-l", "8", "-L", "/dev/stdout"]
+CMD ["busybox", "crond", "-c", "/etc/crontabs", "-f", "-l", "8", "-L", "/dev/stdout"]

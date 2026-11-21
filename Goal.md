@@ -171,6 +171,12 @@ flowchart LR
 
 When work begins, update the progress board and record only the status plus a short note about the latest artifact, blocker, or decision. Keep product and technical definitions in `design.md` so this roadmap remains an execution tracker.
 
+### Web and mobile delivery
+
+Done. The web study interface and installed Android app were tested with questions, transcript sources, persistent bookmarks, history and offline access. The local web client received a live ExpressionCoach answer. Build and installation instructions are in `frontend/README.md`.
+
+The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Questions require the device's personal connection code. The computer can be off. Publish a new snapshot when transcripts or rights change.
+
 ## Project Owner Judgment Questions
 
 1. **Course constraints:** A) the course specifies tools/frameworks; B) choices are open; C) not sure yet.
@@ -353,6 +359,12 @@ flowchart LR
 
 开始执行后更新进度看板，只记录状态和有关最新交付物、阻塞项或决策的简短说明。产品和技术定义统一放在 `design.md`，让本文件保持为执行进度表。
 
+### 网页和手机交付
+
+已完成。网页与安装后的 Android 应用均通过提问、字幕出处、收藏持久化、历史和离线验收。本机网页已收到 ExpressionCoach 真实回答。构建和安装见 `frontend/README.md`。
+
+Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机首次提问需要个人连接码，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
+
 ## 项目负责人判断题
 
 1. **课程限制：**A) 课程指定工具/框架；B) 可自行选择；C) 目前不确定。
@@ -534,6 +546,12 @@ flowchart LR
 ## 상태 업데이트 형식
 
 작업이 시작되면 진행 현황판을 업데이트하고, 상태와 함께 최신 산출물, 막힌 점, 결정에 대한 짧은 메모만 기록합니다. 제품 및 기술 정의는 `design.md`에 두어 이 로드맵이 실행 추적 문서로 유지되게 합니다.
+
+### 웹 및 모바일 제공
+
+완료. 웹 화면과 설치한 Android 앱에서 질문, 자막 출처, 북마크 보존, 기록 및 오프라인 사용을 확인했다. 로컬 웹에서 실제 ExpressionCoach 답변을 받았다. 빌드 및 설치 방법은 `frontend/README.md`에 있다.
+
+Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 개인 연결 코드를 한 번 입력하면 컴퓨터가 꺼져 있어도 사용할 수 있다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
 ## 프로젝트 책임자 판단 질문
 

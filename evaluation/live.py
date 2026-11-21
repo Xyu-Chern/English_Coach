@@ -53,6 +53,10 @@ class LiveEnvironment:
     def claude(self) -> bool:
         return self.settings.provider == "anthropic"
 
+    @property
+    def parallel_continuations(self) -> bool:
+        return self.settings.provider != "responses"
+
     def identity(self) -> dict:
         """What a run manifest records about the chat model and the corpus (no secrets).
 
@@ -64,8 +68,11 @@ class LiveEnvironment:
                     "max_retries": self.settings.max_retries}
         else:
             chat = {"provider": self.settings.provider, "base_url": self.settings.base_url,
-                    "model": self.settings.model if self.settings.provider == "google" else MODEL_SNAPSHOT, "effort": None,
-                    "temperature": 0, "max_completion_tokens": MAX_COMPLETION_TOKENS, "max_retries": 0}
+                    "model": MODEL_SNAPSHOT if self.settings.provider == "openai" else self.settings.model, "effort": None,
+                    "temperature": None if self.settings.provider == "responses" else 0,
+                    "max_completion_tokens": MAX_COMPLETION_TOKENS, "max_retries": 0}
+        if self.settings.provider == "responses":
+            chat.update(stream=True, parallel_continuations=self.parallel_continuations)
         return {**chat, "timeout_seconds": self.settings.timeout_seconds,
                 "snapshot_id": self.manifest["snapshot_id"], "snapshot_schema": self.schema,
                 "snapshot_manifest_sha256": file_sha256(self.snapshot_dir / "manifest.json"),
@@ -81,6 +88,9 @@ class LiveEnvironment:
         elif self.settings.provider == "google":
             if self.settings.base_url != GOOGLE_BASE_URL or not self.settings.api_key:
                 raise SystemExit("Set GEMINI_API_KEY for Google chat.")
+        elif self.settings.provider == "responses":
+            if not self.settings.base_url.startswith("https://") or not self.settings.api_key:
+                raise SystemExit("Set an HTTPS RESPONSES_BASE_URL and RESPONSES_API_KEY.")
         elif self.settings.model != MODEL or self.settings.base_url != PROVIDER or not self.settings.api_key:
             raise SystemExit(f"Set the OpenAI provider with LLM_MODEL={MODEL} and an API key.")
         self.embeddings()  # validate the embedding space before any model call
@@ -95,7 +105,7 @@ class LiveEnvironment:
         """Both systems' chat model: Claude as configured, or the pinned OpenAI snapshot."""
         if self.claude:
             return chat_model(self.settings, max_output_tokens=CLAUDE_MAX_TOKENS)
-        settings = self.settings if self.settings.provider == "google" else replace(self.settings, model=MODEL_SNAPSHOT)
+        settings = replace(self.settings, model=MODEL_SNAPSHOT) if self.settings.provider == "openai" else self.settings
         return chat_model(settings, max_output_tokens=MAX_COMPLETION_TOKENS)
 
     def embeddings(self) -> EmbeddingProvider:

@@ -1,0 +1,97 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>用户提问 → 表达回答 · 骨架代码图</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f5f4ed;color:#173330;font:17px/1.6 "Microsoft YaHei",sans-serif}main{max-width:1360px;margin:auto;padding:24px clamp(12px,3vw,38px)}h1,h2,h3,p{margin:0}h1{font-size:clamp(24px,3vw,36px)}header p{margin:.35em 0 1em;color:#42665d}a{color:#145d51;text-underline-offset:3px}nav{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}nav a,button{border:1px solid #72958a;border-radius:8px;background:white;color:#1a5147;padding:6px 13px;font:inherit;cursor:pointer;text-decoration:none}.banner{background:#205449;color:white;border-radius:12px;padding:12px 18px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin:12px 0}.card,section.panel{background:#fffefa;border:1px solid #bad0c8;border-radius:12px;padding:15px}.card{display:flex;flex-direction:column;gap:6px}.tag{font-size:15px;color:#45665d}.sample{font-size:16px;min-height:46px}pre{font:15px/1.65 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#eaf2eb;border-radius:8px;padding:12px;margin:5px 0 8px}.card pre{flex:1}.card button{text-align:left;background:#f3f8f4}.card button[aria-expanded=true]{background:#19574a;color:white}section.panel{margin:12px 0}.panel h2{font-size:23px}.panel p{margin:7px 0}.chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.chips button[aria-pressed=true]{background:#19574a;color:white}.sources{display:flex;gap:10px;flex-wrap:wrap;font-size:14px;overflow-wrap:anywhere}#maincode{background:#fff9e9}.return{background:#dcece1;border-radius:12px;padding:12px 17px}.small{font-size:14px;color:#416158}details{margin:12px 0}summary{cursor:pointer;font-weight:bold}:focus-visible{outline:3px solid #a15a1b;outline-offset:2px}section{scroll-margin-top:8px}@media(max-width:960px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.grid{grid-template-columns:1fr}.sample{min-height:0}pre{font-size:14px}main{padding:12px}}
+</style></head><body><main><header><h1>用户提问 → 表达回答</h1><p>沿着同一道问题看六次交接。框内为简化 Python 骨架，点框底的箭头查看传了什么。</p></header>
+<nav><a href="#maincode">先看 main()</a><a href="#handoff">看交互代码</a><a href="定时任务_骨架代码图.html">回看字幕如何入库</a></nav>
+<div class="banner"><b>输入　</b>“开会时，怎么礼貌地反对资深同事？”</div>
+<div class="grid"><article class="card"><div class="tag">用户　·　问题 → 一次请求</div><h2>① 接住问题</h2><p class="sample">“开会时，怎么礼貌地反对资深同事？”</p><pre>def 接收(问题):
+    if not 输入有效(问题):
+        return 输入错误
+    return 为本次请求建立会话(问题)</pre><button type="button" data-go="0" aria-controls="handoff">交给②：问题文字、调用预算 ↘</button></article><article class="card"><div class="tag">聊天模型　·　问题 → 候选表达</div><h2>② 模型提议</h2><p class="sample">“That's a fair point, but …” → 关键词 fair point</p><pre>def 生成候选(会话, 问题):
+    回复 = 会话.ask(候选提示, 问题)
+    return 校验格式并生成草稿(回复)</pre><button type="button" data-go="1" aria-controls="handoff">交给③：表达 + 关键短语 ↘</button></article><article class="card"><div class="tag">搜索工具 + PostgreSQL　·　候选表达 → 原文片段</div><h2>③ 查字幕库</h2><p class="sample">查询 fair point → 找回几段字幕和节目名</p><pre>def 检索(草稿):
+    for 候选 in 草稿:
+        命中 = 搜索(候选.表达, 候选.关键短语)
+        草稿.记下(候选, 给原文片段编号(命中))</pre><button type="button" data-go="2" aria-controls="handoff">交给④：片段编号 + 原文 ↘</button></article><article class="card"><div class="tag">模型挑 · Python 核对　·　原文片段 → 已核实引文</div><h2>④ 挑选并核对</h2><p class="sample">选中片段里的 “fair point” → 回原文找这两个词</p><pre>def 选引文(问题, 草稿):
+    选择 = 模型挑编号(问题, 草稿)
+    for 项 in 选择:
+        草稿.挂上引文(项, 校验(项))</pre><button type="button" data-go="3" aria-controls="handoff">交给⑤：有引文或缺引文的草稿 ↘</button></article><article class="card"><div class="tag">Agent 决定 · 程序执行　·　草稿 → 修订后的草稿</div><h2>⑤ 审稿与补找</h2><p class="sample">引文意思不搭 → 重挑已见片段，或回③再查</p><pre>def 修订(草稿):
+    for 回合 in range(3):
+        决定 = 模型审稿(草稿, 剩余预算)
+        执行并校验(决定.动作, 草稿)
+        if 决定.结束:
+            break</pre><button type="button" data-go="4" aria-controls="handoff">交给⑥：最终草稿 ↘</button></article><article class="card"><div class="tag">Python 整理输出　·　最终草稿 → 学习者</div><h2>⑥ 交还答案</h2><p class="sample">建议说法 + 用法说明 + 可核实的例句和出处</p><pre>def 交付(草稿):
+    表达列表 = 排序去重并取前三项(草稿)
+    return 组装结果(表达列表, 运行记录)</pre><button type="button" data-go="5" aria-controls="handoff">交给用户：可读答案 ↘</button></article></div>
+<div class="return"><b>这六步共用一份草稿</b>　② 写入候选表达 → ③ 追加原文编号 → ④ 挂上核实的引文 → ⑤ 修改或补找 → ⑥ 生成给用户的答案。</div>
+<section class="panel" id="handoff" tabindex="-1"><h2>箭头里面的代码</h2><div class="chips"><button type="button" data-tab="0" aria-controls="detail0" aria-pressed="true">① 接住问题</button><button type="button" data-tab="1" aria-controls="detail1" aria-pressed="false">② 模型提议</button><button type="button" data-tab="2" aria-controls="detail2" aria-pressed="false">③ 查字幕库</button><button type="button" data-tab="3" aria-controls="detail3" aria-pressed="false">④ 挑选并核对</button><button type="button" data-tab="4" aria-controls="detail4" aria-pressed="false">⑤ 审稿与补找</button><button type="button" data-tab="5" aria-controls="detail5" aria-pressed="false">⑥ 交还答案</button></div>
+<div id="detail0" ><b>问题 → 一次请求</b><p>输入是一个字符串。会话帮这次请求记住还可以问模型几次、查资料几次，并留下每一步的记录。</p><pre>问题 = "开会时，怎么礼貌地反对资深同事？"
+if not 有效文字(问题, 最长=4000):
+    return RunResult(status="invalid_input", ...)
+会话 = 新建会话(模型, 搜索工具)
+候选集 = 会话.ask("生成候选", {"question": 问题}, 候选格式)</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/coach.py">agents/coach.py</a> · <a href="../../translation_agent_demo/agents/session.py">agents/session.py</a></div></div><div id="detail1" hidden><b>问题 → 候选表达</b><p>提示词要求模型提议 6 个候选说法。程序检查返回格式，每条候选会带表达、关键短语和用法说明。遇到不支持的来源或范围外请求，流程可以直接结束。</p><pre>模型回复 = 模型.complete_with_usage(
+    system_prompt=候选提示, user_payload=问题JSON,
+    response_format=候选格式)
+候选集 = 解析并检查(模型回复.content)
+if 候选集.拒答:
+    return 空表达列表, 拒答说明
+草稿 = 为各个候选建立位置(候选集)</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/systems/first_stage.py">agents/systems/first_stage.py</a> · <a href="../../translation_agent_demo/agents/schemas/prefix.py">agents/schemas/prefix.py</a></div></div><div id="detail2" hidden><b>候选表达 → 原文片段</b><p>这里接上第一张图的数据库。查询向量由 embedding 模型计算。搜索先找含关键短语的段落；在相同条件下没有字面命中，再按意思找。每个候选最多取 3 个段落。</p><pre>查询向量 = 向量模型.embed_texts([候选.表达]).vectors[0]
+命中 = 查库(查询向量, 短语=候选.关键短语, 上限=3)
+if not 命中:
+    命中 = 查库(查询向量, 短语=None, 上限=3)
+片段目录 = 给句子编号并记住原文位置(命中)
+# 查库内部：psycopg 发送 SQL 和参数
+# ORDER BY 向量 &lt;=&gt; %s::vector ASC LIMIT 3 （等价简写）</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/tools/search.py">agents/tools/search.py</a> · <a href="../../translation_agent_demo/tools/search_corpus.py">tools/search_corpus.py</a> · <a href="../../translation_agent_demo/storage/retrieval.py">storage/retrieval.py</a></div></div><div id="detail3" hidden><b>原文片段 → 已核实引文</b><p>模型交回编号、它声称能摘出的措辞和用法说明。程序用编号找回原句，检查文字、关键短语和重复使用，再从原文复制引句。文字真实与语境合适是两项判断。</p><pre>片段 = 目录.get(选择.ref)
+if 片段不存在或已使用(片段):
+    return None
+if 缺说明(选择) or not 摘录存在(选择.措辞, 片段):
+    return None
+if not 关键短语覆盖合格(选择):
+    return None
+return 从原文复制引句和出处(片段)</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/tools/select.py">agents/tools/select.py</a> · <a href="../../translation_agent_demo/agents/evidence.py">agents/evidence.py</a> · <a href="../../translation_agent_demo/agents/draft.py">agents/draft.py</a></div></div><div id="detail4" hidden><b>草稿 → 修订后的草稿</b><p>初筛后保留最多三个回答位置。Agent 看草稿、已见片段和剩余次数，可以检索、重挑、换表达或结束。替换已有引文失败时能恢复旧项。若最后一轮刚查过，还有预算，可再挑一次。</p><pre>for 动作 in 决定.动作:
+    if 动作.类型 == "search":
+        记下新片段(调用③检索(动作))
+    elif 动作.类型 in ("repick", "replace"):
+        旧项 = 保存当前位置()
+        执行更改并调用④校验(动作)
+        if 旧项有引文且新项验证失败():
+            恢复(旧项)</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/systems/agent.py">agents/systems/agent.py</a> · <a href="../../translation_agent_demo/agents/tools/change.py">agents/tools/change.py</a> · <a href="../../translation_agent_demo/agents/systems/baseline.py">agents/systems/baseline.py</a></div></div><div id="detail5" hidden><b>最终草稿 → 学习者</b><p>有证据的条目一般排在前面；有语义疑问、因保护机制而保留的条目可移到末尾。缺少通过校验的引文时，该表达会明确显示没有已核实的例句。</p><pre># 只取报告中一个表达的部分字段示意
+表达 = "That's a fair point, but have you considered how it would work with the legacy service?"
+引文 = "Yeah, that's a fair point."
+节目 = "Opening up the opinion box"
+
+结果.answer       # 用户看到的排版文字
+结果.expressions  # 程序读取的表达、说明和可选引用
+结果.trace        # 开发时查看每一步发生了什么</pre><div class="sources">源码对照 <a href="../../translation_agent_demo/agents/tools/assemble.py">agents/tools/assemble.py</a> · <a href="../../translation_agent_demo/agents/results.py">agents/results.py</a></div></div></section>
+<section class="panel" id="maincode"><h2>main() 把整条线接起来</h2><p>这是教学入口。项目中实际接收一次提问的是 <code>ExpressionCoach.answer()</code>。</p><pre>def main():
+    模型, 搜索工具 = 接好聊天模型和字幕库()
+    教练 = ExpressionCoach(CoachDependencies(model=模型, search=搜索工具), "agent")
+    问题 = input("你想用英语表达什么？")
+    结果 = 教练.answer(问题)       # 里面跑的是上面的 ① → ⑥
+    print(结果.answer)
+
+if __name__ == "__main__":
+    main()</pre>
+<details open><summary>展开 answer()，看它怎样依次调用六步</summary><pre>def 回答(问题):
+    会话 = 接收(问题)                    # ① 建立本次请求；输入无效就返回错误
+    草稿 = 生成候选(会话, 问题)           # ② 建议表达
+    if 草稿.拒答:
+        return 空答案和原因(草稿)
+    检索(草稿)                          # ③ 查库，原文和编号记回草稿
+    选引文(问题, 草稿)                   # ④ 校验后将草稿缩至三个位置
+    修订(草稿)                          # ⑤ 必要时再走③或④
+    return 交付(草稿)                    # ⑥ 返回 RunResult</pre></details>
+<details><summary>模型和数据库怎么交给教练？</summary><pre>模型 = chat_model(配置)
+# conn 是已打开的 PostgreSQL 连接
+def 搜索工具(参数):
+    return search_corpus(参数, conn=conn, embeddings=向量模型)
+
+依赖 = CoachDependencies(model=模型, search=搜索工具)
+教练 = ExpressionCoach(依赖, "agent")</pre></details>
+<details><summary>没有例句、拒答、服务出错，分别返回什么？</summary><p>缺例句：可以返回建议表达，并标明没有通过校验的播客例句。拒答：返回空表达列表和原因。空白输入：返回 invalid_input。数据库、模型或语料未就绪等故障：返回 error 和原因码。</p></details>
+<details><summary>固定流程和 Agent 在哪里分开？</summary><p>① 到 ④ 两者共用。到了 ⑤，固定流程按规则补缺引文的位置；Agent 可以重新检查整份草稿，包括已经有引文的位置。最后两者都走 ⑥。</p></details>
+<div class="sources">教练入口 <a href="../../translation_agent_demo/agents/coach.py">agents/coach.py</a> · <a href="../../docs/how-it-works.html">报告里的真实输入与输出</a></div></section><p class="small">对应本地 pr/submission 分支 cc8de5b。示例以中文说明，⑥ 中的英文表达与引文摘自项目已有的评测记录。</p></main>
+<script>
+const buttons=[...document.querySelectorAll('[data-tab]')], links=[...document.querySelectorAll('[data-go]')];
+function selectStep(i){buttons.forEach((b,j)=>{const matches=i===j;document.getElementById('detail'+j).hidden=!matches;b.setAttribute('aria-pressed',String(matches));links[j].setAttribute('aria-expanded',String(matches))})}
+buttons.forEach((b,i)=>b.onclick=()=>selectStep(i));links.forEach((b,i)=>b.onclick=()=>{selectStep(i);document.getElementById('handoff').focus();document.getElementById('handoff').scrollIntoView()});selectStep(0);
+</script></body></html>

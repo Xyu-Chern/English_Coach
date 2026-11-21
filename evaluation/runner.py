@@ -57,6 +57,8 @@ SOURCES = sorted([*(str(p.relative_to(ROOT)) for p in (ROOT / "translation_agent
                   "evaluation/data/tasks.jsonl", "evaluation/data/pricing.json", "translation_agent_demo/config.py",
                   "translation_agent_demo/providers/anthropic_chat.py",
                   "translation_agent_demo/providers/google_chat.py",
+                  "translation_agent_demo/providers/responses.py",
+                  "translation_agent_demo/providers/local_embeddings.py",
                   "translation_agent_demo/providers/openai_compatible.py",
                   "translation_agent_demo/providers/openai_embeddings.py",
                   "translation_agent_demo/providers/embeddings.py", "translation_agent_demo/providers/google_embeddings.py",
@@ -250,7 +252,7 @@ class PairAttempt:
             models = {p: RecordingModel(self.model) for p in parts}
             deps = {p: CoachDependencies(models[p], searches[p]) for p in parts}
             results = answer_pair(deps["prefix"], task.question, continuations={s: deps[s] for s in self.systems},
-                                  concurrent=True)
+                                  concurrent=getattr(self.environment, "parallel_continuations", True))
         if set(results) != set(self.systems):  # a system without its own recorder would mix into the prefix's record
             raise RuntimeError(f"answer_pair returned {sorted(results)}, expected {sorted(self.systems)}")
         prefix = (_shared(models["prefix"].events), _shared(searches["prefix"].observations))

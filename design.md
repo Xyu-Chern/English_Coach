@@ -1,6 +1,6 @@
 # AI English Speaking Phrase Agent — Design
 
-> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. A user interface is an optional final stretch goal.
+> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below.
 
 ### Current minimal demo slice
 
@@ -44,7 +44,7 @@ The portfolio should make the Agent behavior reviewable: tool inputs and outputs
 - Full responsive web app or native mobile application
 - Speech input, pronunciation scoring, broad tutoring chat, multi-agent orchestration, or spaced repetition
 
-The project does not need a Next.js front end to demonstrate Agent development. Use an API client, command-line demo, or API documentation as the initial interface. Add a user interface only if the P0 work is complete and time remains.
+The project does not need a Next.js front end to demonstrate Agent development. Use an API client, command-line demo, or API documentation as the initial interface. The later learner-client delivery is documented under Learner clients.
 
 ## 4. Agent workflow
 
@@ -160,6 +160,12 @@ The original idea document describes a broader English coach. This MVP deliberat
 
 This project is interview-ready when each in-scope claim can be supported by a design artifact, a trace, or an evaluation result, and deferred features are described as deliberate scope decisions rather than completed capabilities.
 
+### Learner clients
+
+The web client and installable Android client share a bilingual interface and an offline phrase collection. A saved card and search history belong to the current device. POST /api/search accepts a question and optional context and returns learner-facing expressions with verified source details from ExpressionCoach. Credentials stay on the Python server.
+
+The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Questions require the device's personal connection code. The computer can be off. Publish a new snapshot when transcripts or rights change.
+
 ## 11. Project Owner Judgment Questions
 
 1. Should the first release focus on daily conversation, IELTS speaking, or both?
@@ -172,7 +178,7 @@ This project is interview-ready when each in-scope claim can be supported by a d
 
 # AI 英语口语表达 Agent — 设计文档
 
-> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；用户界面是最后的可选扩展。
+> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。
 
 ### 当前最小 Demo 切片
 
@@ -216,7 +222,7 @@ This project is interview-ready when each in-scope claim can be supported by a d
 - 完整的响应式网页应用或原生移动应用
 - 语音输入、发音评分、泛化辅导聊天、多智能体编排或间隔重复系统
 
-展示 Agent 开发不要求使用 Next.js 前端。初期可通过 API 客户端、命令行演示或 API 文档来试用。只有完成 P0 且仍有时间时，才添加用户界面。
+展示 Agent 开发不要求使用 Next.js 前端。初期可通过 API 客户端、命令行演示或 API 文档来试用。后续界面交付见「学习客户端」。
 
 ## 4. Agent 工作流
 
@@ -332,6 +338,12 @@ flowchart TD
 
 当项目范围内的每项主张都有设计材料、追踪记录或评估结果支撑，并且后续功能被明确描述为范围选择而非已实现能力时，本项目就具备面试展示基础。
 
+### 学习客户端
+
+网页和可安装的 Android 客户端共用中韩双语界面和离线表达集。收藏与学习历史保存在当前设备。POST /api/search 接收问题和可选场景，返回 ExpressionCoach 给出的表达及经过核对的字幕出处。密钥保存在 Python 服务端。
+
+Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机首次提问需要个人连接码，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
+
 ## 11. 项目负责人判断题
 
 1. 第一版优先支持日常交流、雅思口语，还是两者都支持？
@@ -344,7 +356,7 @@ flowchart TD
 
 # AI 영어 말하기 표현 Agent — 설계 문서
 
-> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 사용자 인터페이스는 마지막 선택적 확장 목표입니다.
+> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다.
 
 ### 현재 최소 Demo 슬라이스
 
@@ -388,7 +400,7 @@ IELTS 7점 안팎의 학습자가 자연스러운 영어 구어 표현을 떠올
 - 완전한 반응형 웹 앱 또는 네이티브 모바일 앱
 - 음성 입력, 발음 채점, 범용 튜터링 채팅, 멀티 에이전트 오케스트레이션, 간격 반복 학습
 
-Agent 개발을 보여 주는 데 Next.js 프런트엔드는 필요하지 않습니다. 초기 인터페이스로는 API 클라이언트, 명령줄 데모, API 문서를 사용합니다. P0 작업이 끝나고 시간이 남을 때만 사용자 인터페이스를 추가합니다.
+Agent 개발을 보여 주는 데 Next.js 프런트엔드는 필요하지 않습니다. 초기 인터페이스로는 API 클라이언트, 명령줄 데모, API 문서를 사용합니다. 이후 화면 제공 내용은 학습 클라이언트 절에 기록합니다.
 
 ## 4. Agent 워크플로
 
@@ -503,6 +515,12 @@ flowchart TD
 | 주도성과 트레이드오프(Q55–60) | 짧은 결정/실패 로그를 유지하고, 설계 선택·그것이 막는 장애·측정 근거를 연결하는 시연 설명 준비 | 프로젝트 책임자가 실제로 완료한 구현과 결과만 설명 |
 
 범위 안의 모든 주장이 설계 산출물, 트레이스, 평가 결과로 뒷받침되고, 보류된 기능이 완성된 기능이 아니라 의도적인 범위 결정으로 설명될 때 이 프로젝트는 면접에서 보여 줄 준비가 된 것입니다.
+
+### 학습 클라이언트
+
+웹과 설치형 Android 앱은 중·한 이중 언어 화면과 오프라인 표현 모음을 공유한다. 저장한 표현과 학습 기록은 현재 기기에 보관한다. POST /api/search는 질문과 선택한 맥락을 받아 ExpressionCoach의 표현과 검증된 자막 출처를 반환한다. 키는 Python 서버에 보관한다.
+
+Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 개인 연결 코드를 한 번 입력하면 컴퓨터가 꺼져 있어도 사용할 수 있다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
 ## 11. 프로젝트 책임자 판단 질문
 

@@ -1,0 +1,74 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>定时任务 · 三段 Python 如何接力</title><style>*{box-sizing:border-box}body{margin:0;background:#f5f4ed;color:#173330;font:18px/1.5 "Microsoft YaHei",sans-serif}main{max-width:1450px;margin:auto;padding:24px 32px}h1,h2,p{margin:0}h1{font-size:32px}header p{color:#41645c;margin:3px 0 16px}.clock,.db{padding:12px 18px;border-radius:12px;background:#1e514a;color:white}.clock b,.db b{font-size:23px}.clock span,.db span{margin-left:16px}.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.lane{display:flex;flex-direction:column}.time,.transfer{text-align:center;padding:8px 0;color:#215d52;font-weight:bold}.card{background:white;border:1px solid #b9cfc7;border-radius:12px;padding:14px;flex:1}.card h2{font-size:23px}.in{color:#45635b;margin:5px 0 9px}pre{font:16px/1.65 "Cascadia Mono",Consolas,"Microsoft YaHei",monospace;background:#edf4ee;padding:10px;border-radius:8px;min-height:208px;overflow:auto;margin:0 0 8px}.note{font-size:16px}.db{background:#dcece1;color:#15392a}.dbrow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:5px}.dbrow div{background:#ffffffab;padding:7px;border-radius:6px;text-align:center}.foot{font-size:15px;margin:14px 0}a{color:#215d52}@media(max-width:900px){main{padding:14px}.lanes{grid-template-columns:1fr}.card{padding:12px}pre{min-height:0}.dbrow{grid-template-columns:1fr}.clock span,.db span{display:block;margin:0}}</style><main><header><h1>定时任务 · 三段 Python 如何接力</h1><p>追踪第 2 集字幕。相同的 db 代表同一个 PostgreSQL 数据库。框内是简化的 Python 骨架。</p></header><div class="clock"><b>工作容器里的 cron 闹钟</b><span>按时间表分别叫醒三个程序。到了各自的时间，各自检查有没有工作。</span></div><div class="lanes"><div class="lane"><div class="time">↓　00、03、06… 分</div><div class="card"><h2>① 下载字幕</h2><div class="in">节目网站的第 2 集</div><pre>def 下载任务():
+    for 单集 in db.待下载的单集():
+        字幕 = 下载字幕(单集)
+        with db.transaction():
+            db.保存原文(单集, 字幕)
+            db.标记下载完成(单集)</pre><p class="note">先下载；正文和完成标记一起提交。</p></div><div class="transfer">↓ 写入整集原文</div></div><div class="lane"><div class="time">↓　01、04、07… 分</div><div class="card"><h2>② 切成小段</h2><div class="in">从库里取待切的原文</div><pre>def 切段任务():
+    for 文档 in db.待切段的原文():
+        发言 = 解析字幕(文档.原文)
+        小段 = 切成小段(发言)
+        db.保存小段(文档.编号, 小段)</pre><p class="note">每段带着原文位置，以后能查回出处。</p></div><div class="transfer">↑ 读原文　↓ 写小段</div></div><div class="lane"><div class="time">↓　02、05、08… 分</div><div class="card"><h2>③ 算 embedding</h2><div class="in">从库里取还缺向量的小段</div><pre>def 向量任务():
+    if 向量化已开启:
+        小段 = db.取一批缺向量的小段()
+        if 小段:
+            文本 = [段.正文 for 段 in 小段]
+            向量 = 模型.embed_texts(文本)
+            db.保存向量(小段, 向量)</pre><p class="note">模型将文本变成数字；程序把数字存回去。</p></div><div class="transfer">↑ 读小段　↓ 写向量</div></div></div><div class="db"><b>同一个 PostgreSQL 数据库</b><span>① 存下的原文供 ② 读取；② 存下的小段供 ③ 读取。</span><div class="dbrow"><div>第 2 集的整篇字幕</div><div>第 2 集 · 第 8 段及其原文位置</div><div>第 8 段 ↔ 对应的一串数字</div></div></div><style>
+#sql{margin:22px 0 12px;padding:18px;border:1px solid #b9cfc7;background:white;border-radius:12px}#sql p{margin:6px 0 12px}.tabs{display:flex;gap:8px;flex-wrap:wrap}.tabs button{font:inherit;padding:7px 13px;background:#eef4ef;border:1px solid #93afa1;border-radius:7px;cursor:pointer}.tabs button[aria-pressed=true]{background:#1e514a;color:white}.pane{margin-top:15px}.pane strong{color:#215d52}.pane pre,#entry pre{min-height:0;white-space:pre-wrap;overflow-wrap:anywhere}#entry{background:#fffdf4;border:1px solid #d4c8a8;padding:18px;border-radius:12px;margin:14px 0}#entry p{margin:5px 0 12px}button:focus-visible,a:focus-visible{outline:3px solid #a55517}.transfer a{display:block;text-decoration:underline;text-underline-offset:4px}
+</style><section id="sql"><h2>箭头里面的代码</h2><p>每点一次，看一处交接。conn 是 Python 到 PostgreSQL 的连接。</p><div class="tabs"><button type="button" data-step="0" aria-controls="step0" aria-pressed="true">① 写入整集原文</button><button type="button" data-step="1" aria-controls="step1" aria-pressed="false">② 读原文 → 写小段</button><button type="button" data-step="2" aria-controls="step2" aria-pressed="false">③ 读小段 → 写向量</button></div><section class="pane" id="step0" ><strong>节目网站 → 原文表</strong><p>Python 先取字幕，再把正文和“下载完成”一起写入。下面的 %s 留给右侧参数。</p><pre>def 下载任务(conn):
+    for 集号, 网址 in 取待下载单集(conn):
+        正文 = 下载字幕(网址)
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO 原文表 (集号, 正文) VALUES (%s, %s)",
+                (集号, 正文))
+            conn.execute(
+                "UPDATE 任务表 SET 已下载 = true WHERE 集号 = %s",
+                (集号,))</pre><p>第 2 集 → 原文表里多出一行，任务表里第 2 集打勾。　<a href="../../translation_agent_demo/storage/corpus.py">项目里的存储代码 ↗</a></p></section><section class="pane" id="step1" hidden><strong>原文表 → 小段表</strong><p>execute 发出 SELECT，fetchall 取回行。切段函数交回“起点、终点、小段正文”，位置是原文里的字符位置。</p><pre>def 切段任务(conn):
+    文档 = conn.execute(
+        "SELECT 集号, 正文 FROM 原文表 WHERE 已切段 = false"
+    ).fetchall()
+    for 集号, 正文 in 文档:
+        with conn.transaction():
+            for 起点, 终点, 片段 in 解析并切段(正文):
+                conn.execute(
+                    "INSERT INTO 小段表 (集号, 起点, 终点, 正文) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (集号, 起点, 终点, 片段))
+            conn.execute(
+                "UPDATE 原文表 SET 已切段 = true WHERE 集号 = %s",
+                (集号,))</pre><p>第 2 集 → 若干小段。每段自动获得一个段号，保留所属集号和原文位置。　<a href="../../translation_agent_demo/storage/chunks.py">项目里的存储代码 ↗</a></p></section><section class="pane" id="step2" hidden><strong>小段表 → 模型 → 向量表</strong><p>按段号查哪些小段还缺向量，只把正文发给模型；保存时用同一个段号把数字和原文对上。</p><pre>def 向量任务(conn, 模型):
+    待处理 = conn.execute("""
+        SELECT 段号, 正文 FROM 小段表
+        WHERE 段号 NOT IN (SELECT 段号 FROM 向量表)
+        ORDER BY 段号 LIMIT 32
+    """).fetchall()
+    if not 待处理:
+        return
+    文本 = [正文 for 段号, 正文 in 待处理]
+    一批向量 = 模型.embed_texts(文本).vectors
+    with conn.transaction():
+        for (段号, _), 向量 in zip(待处理, 一批向量, strict=True):
+            conn.execute(
+                "INSERT INTO 向量表 (段号, 数字) VALUES (%s, %s::vector)",
+                (段号, json.dumps(向量)))</pre><p>假设其中一段的段号是 8，向量表就以 8 关联它；下次查询会跳过这段。　<a href="../../translation_agent_demo/storage/embeddings.py">项目里的存储代码 ↗</a></p></section><small>单进程教学骨架，表名和字段已简化。原文表的“已切段”默认 false，段号由数据库生成。下载、解析、模型与配置沿用上图的抽象。</small></section>
+<section id="entry"><h2>最后从 main() 走一遍</h2><p>教学版把三个任务顺序调用一次，同一个 conn 传到底。读代码时从这里出发。</p><pre>import json
+import psycopg
+
+def main():
+    with psycopg.connect(数据库地址, autocommit=True) as conn:
+        下载任务(conn)                 # 网站 → 原文表
+        切段任务(conn)                 # 原文表 → 小段表
+        if 向量化已开启:
+            向量任务(conn, 模型)       # 小段表 → 向量表
+
+if __name__ == "__main__":
+    main()</pre><p>项目实际部署时，cron 在三个时间点分别启动三个任务。各任务各自连接同一个数据库，通过已保存的记录交接。</p></section>
+<script>
+const tabs=Array.from(document.querySelectorAll('[data-step]'));
+function selectStep(index){
+ tabs.forEach((btn,i)=>{document.getElementById('step'+i).hidden=i!==index;btn.setAttribute('aria-pressed',String(i===index))});
+}
+tabs.forEach((b,i)=>b.onclick=()=>selectStep(i));
+document.querySelectorAll('.transfer').forEach((t,i)=>{const a=document.createElement('a');a.href='#sql';a.textContent=t.textContent+' ↘';a.onclick=()=>selectStep(i);t.replaceChildren(a)});
+</script><p class="foot">源码对照　<a href="../../translation_agent_demo/jobs/podcast_sync.py">① 下载字幕</a>　<a href="../../translation_agent_demo/jobs/corpus_build.py">② 切成小段</a>　<a href="../../translation_agent_demo/jobs/corpus_embed.py">③ 算 embedding</a>　<a href="../../translation_agent_demo/docker/podcast-sync.crontab">cron 时间表</a></p></main></html>
