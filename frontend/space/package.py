@@ -32,6 +32,7 @@ def package():
         copy(ROOT / "frontend/space" / name, name)
     for name in (
         "frontend/server.py",
+        "frontend/staged.py",
         "frontend/requirements.txt",
         "translation_agent_demo/requirements.txt",
         "translation_agent_demo/requirements-local.txt",

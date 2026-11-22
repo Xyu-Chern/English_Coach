@@ -569,7 +569,7 @@ class LockTests(unittest.TestCase):
         agent = results["agent"]
         self.assertEqual((agent.status, agent.error_code), ("error", "model_unavailable"))
         self.assertEqual(stages(agent)[:3], ["agent_1", "search_1_1", "validate_agent_1"])
-        self.assertIsNone(agent.expressions)  # keeping what was sent first is the server's job
+        self.assertIsNone(agent.expressions)  # the server keeps what was sent first (frontend/staged.py)
 
     def test_without_a_verified_example_nothing_is_locked(self):
         turn = decision(repick(0, "c0h1s1", "let's table this for now", reason="copy the wording exactly"))

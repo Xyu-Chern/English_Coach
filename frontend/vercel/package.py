@@ -64,6 +64,7 @@ def main():
             copy(p, p.relative_to(ROOT))
     for name in (
         "frontend/server.py",
+        "frontend/staged.py",
         "frontend/vercel/coach.py",
         "evaluation/snapshot_search.py",
     ):

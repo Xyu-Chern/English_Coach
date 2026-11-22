@@ -1,6 +1,6 @@
 # AI English Speaking Phrase Agent — Design
 
-> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below. Owner decisions D1 (the verified-slot lock) and D6 (a re-evaluation) are recorded under Learner clients.
+> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below. Owner decisions D1–D3, D5 and D6 (verified examples first, the verified-slot lock, the request log and a re-evaluation) are recorded under Learner clients.
 
 ### Current minimal demo slice
 
@@ -117,6 +117,8 @@ These are proposals, not decisions about vendors. Prefer tools required or alrea
 
 The search response should distinguish `matched`, `needs_clarification`, and `no_match` outcomes. Do not use a client-supplied user ID as proof of identity.
 
+The delivered learner API differs from this outline: it takes `{question, context}` and returns expressions with sources and a note, as one JSON reply or as staged NDJSON lines (see Learner clients → API).
+
 ## 8. Evaluation and acceptance
 
 Build a fixed set of Chinese queries covering paraphrases, ambiguous meaning, context-sensitive expressions, several topic areas, and cases with no suitable stored result. A proposed starting size is 30–50 queries, adjusted to the time and data available.
@@ -166,14 +168,48 @@ The web client and installable Android client share a bilingual interface and an
 
 The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
 
-#### Owner decisions D1 and D6
+#### Owner decisions D1–D3, D5 and D6
 
-Agreed on 2026-11-21. The sections below implement the coach side of D1 and prepare D6.
+Agreed on 2026-11-21. The sections below implement D1–D3 and D5, and prepare D6.
 
 | ID | Decision |
 |---|---|
 | D1 | When the first stage verifies at least one example, send only the verified expressions and examples at once. They never change. The continuation (baseline or agent) fills only the empty slots. With all three verified, neither system runs a continuation. With none verified, send the finished answer once. |
+| D2 | A school project: questions may be shown and kept as written. |
+| D3 | No user identity. Data is per request. |
+| D5 | No production store. The mode is an environment variable and a redeploy. Live requests are not stored; each prints one log line. A learner who leaves cannot fetch the rest later. |
 | D6 | After the lock, re-run the baseline and the locked agent locally with the real API (50 tasks × 3, then grading, about $6). |
+
+#### Verified examples first (D1)
+
+- An empty slot has no verified example. The first result holds only verified expressions with their examples. Unverified candidates are never sent early.
+- What was sent is final. The final answer starts with the sent items unchanged. If that ever broke, the server would put the sent items first and log `invariant_ok: false`.
+- The learner sees the first examples at once. While the continuation runs, a notice above the chat says more podcast examples are being looked for, and that keeping the screen open shows when it ends. Examples found later go to a new **Podcast** tab with a badge. The chat answer does not change.
+- If the learner leaves, the first examples stay in the device history, and the app offers **Look again** on return (D5).
+- The chat page keeps its brand; the notice, the empty slot, the waiting time and the Podcast tab are new. The tabs show on the chat page too, so the Podcast tab's badge can be seen and tapped at once; the notice and the slot also link to it.
+- Reversible default: a new coach question waits while a background search runs, because the server answers one request per process. The full state table is in `frontend/README.md`.
+
+#### API: POST /api/search
+
+The request is `{question, context}`. The default reply is one JSON object, `{expressions, note}`, as before, so installed APKs keep working. A client that sends `Accept: application/x-ndjson` gets one JSON object per line:
+
+| Line | When | Fields |
+|---|---|---|
+| `first` | The first stage verified 1–3 examples | `expressions` (verified only), `pending` (`false`: nothing follows), `note` |
+| `final` | After the continuation. The only line when nothing was verified or the request was declined | `expressions` (the whole answer, sent items first), `added` (indexes of later examples), `note` |
+| `error` | In place of `final` | `code`: `timeout`, `coach_unavailable` or a coach code |
+
+- Each item keeps `expression`, `key_phrase`, `note` and `citation`.
+- Refusals (401, 403, 422 `invalid_input`, 429 `coach_busy`) are plain HTTP errors before any line.
+- The JSON reply is the last answer the stream would show. If the continuation fails after verified examples were found, the reply returns them with 200 (before this change: 503).
+- Work stops 280 s after the request starts (Vercel's `maxDuration` is 300 s), with the error code `timeout`. One request runs per process. If the client leaves, the work stops at its next model call or search.
+
+#### Mode and request log (D5)
+
+- `COACH_SYSTEM` is `agent` (the default, the locked agent) or `baseline`. `COACH_CONTINUATION` is `on` (the default) or `off` (first stage only, not evaluated). The server reads both once at start and refuses to start on any other value, so a change needs a new deployment.
+- Each request that passes the access checks prints one JSON line to stdout: `event` (`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`.
+- `question_head` is the first 40 characters of the question (D2). The context and the answer are not logged. Time to the first answer is `first_ms`, or `total_ms` when it is `null`.
+- Retention is Vercel's runtime-log retention: 1 hour on Hobby, 1 day on Pro. Nothing else about a request is stored. Field meanings are in `frontend/README.md`.
 
 #### Verified-slot lock and evaluation reproducibility
 
@@ -198,12 +234,16 @@ In the submission run's 129 normal answers, the first stage verified all three s
 
 #### Known gaps
 
-- The learner clients still receive one finished answer. Sending the verified examples first (the rest of D1) is not implemented yet.
+- Not yet checked on a real deployment or device: line-by-line streaming through Vercel and the Android WebView, and idle timeouts during a quiet continuation (there is no ping line).
+- Installed APKs keep the JSON flow, so they show no early results until the APK is rebuilt.
+- The deadline stops work between calls. A model call already running is not cut.
 - The app's default agent is the locked agent that D6 measured: equal to the baseline on pass, not better as the pre-lock submission agent was (judgment question R1).
 
 ## 11. Project Owner Judgment Questions
 
 **R1. Submission wording and deployed default after D6:** keep the locked agent as the default and write "same accuracy as the baseline, plus kept examples and skipped continuations"? Recommended: yes, because the lock keeps the D1 promise and the strict gap is not significant. Alternatives: switch the default to the baseline (cheaper, same results), or cite only the submission results and attach the D6 run as an appendix.
+
+Nothing else is pending in this document. The open question on a coach question during a background search is in `frontend/README.md` (judgment question 1).
 
 The five earlier scope questions are settled by the delivered clients: a question takes an optional context; an answer shows up to three expressions with a key phrase, note and podcast source; saving and history stay on the device; topics follow the podcast corpus.
 
@@ -211,7 +251,7 @@ The five earlier scope questions are settled by the delivered clients: a questio
 
 # AI 英语口语表达 Agent — 设计文档
 
-> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。项目负责人决定 D1（核对位置锁定）和 D6（重新评估）记录在「学习客户端」中。
+> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。项目负责人决定 D1–D3、D5 和 D6（先发送已核对的例句、核对位置锁定、请求日志和重新评估）记录在「学习客户端」中。
 
 ### 当前最小 Demo 切片
 
@@ -328,6 +368,8 @@ flowchart TD
 
 搜索响应应区分 `matched`、`needs_clarification` 和 `no_match` 三种结果。不能把客户端提供的用户 ID 当作身份凭证。
 
+已交付的学习端 API 与这份草案不同：它接收 `{question, context}`，返回带出处的表达和说明，形式为一个 JSON 回复或分阶段的 NDJSON 行（见「学习客户端」中的 API）。
+
 ## 8. 评估与验收
 
 建立固定的中文查询集，覆盖不同说法、含义模糊、依赖语境的表达、多个话题，以及表达库中没有合适结果的情况。初步建议为 30–50 条查询，再根据时间和数据调整。
@@ -377,14 +419,48 @@ flowchart TD
 
 Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
 
-#### 项目负责人决定 D1 和 D6
+#### 项目负责人决定 D1–D3、D5 和 D6
 
-2026-11-21 确定。下文实现 D1 的教练部分，并为 D6 做好准备。
+2026-11-21 确定。下文实现 D1–D3 和 D5，并为 D6 做好准备。
 
 | 编号 | 决定 |
 |---|---|
 | D1 | 第一阶段至少核对通过一个例句时，立即只发送核对通过的表达和例句，之后不再改变。后续阶段（baseline 或 agent）只填补空位。三个都核对通过时，两个系统都不运行后续阶段。一个都没有时，完成后一次发送最终答案。 |
+| D2 | 这是学校项目：问题可以原样显示和保存。 |
+| D3 | 不区分用户，数据只按请求计。 |
+| D5 | 不增加运行时存储。模式通过环境变量加重新部署切换。线上请求不保存，每个请求只打印一行日志。学习者离开后，无法再从服务端取回剩余结果。 |
 | D6 | 加锁后，在本地用真实 API 重新评估 baseline 和加锁的 agent（50 题 × 3 次，再评分，约 6 美元）。 |
+
+#### 先发送已核对的结果（D1）
+
+- 空位是没有核对通过例句的位置。先发送的结果只包含核对通过的表达及其例句，未核对的候选不会提前发送。
+- 已发送的内容就是最终内容。最终答案以未改动的已发送条目开头。万一不成立，服务端会把已发送条目放在最前面，并在日志中记录 `invariant_ok: false`。
+- 学习者立即看到先到的例句。后续阶段运行期间，聊天上方的提示条说明正在查找更多播客例句，并说明保持此页面打开就会在结束时得到提示。后来找到的例句放进新的带徽标的 **播客** 页，聊天中的回答不变。
+- 学习者离开后，先到的例句仍保存在设备历史中，再次打开时应用提供 **重新查找**（D5）。
+- 聊天页保持现有品牌，新增的是提示条、空位、等待时间和播客页。聊天页也显示标签栏，播客页的徽标一眼可见，可以直接点开；提示条和空位也链接到那里。
+- 可逆的默认做法：后台查找进行时，新的教练提问需要等待，因为服务端每个进程只处理一个请求。完整的状态表见 `frontend/README.md`。
+
+#### API：POST /api/search
+
+请求为 `{question, context}`。默认回复仍是一个 JSON 对象 `{expressions, note}`，所以已安装的 APK 可以照常使用。客户端发送 `Accept: application/x-ndjson` 时，改为每行返回一个 JSON 对象：
+
+| 行 | 何时 | 字段 |
+|---|---|---|
+| `first` | 第一阶段核对了 1–3 个例句 | `expressions`（只有核对通过的条目）、`pending`（`false` 表示后面没有内容）、`note` |
+| `final` | 后续阶段结束后。没有核对通过的例句或请求被拒绝时，只有这一行 | `expressions`（完整答案，已发送条目在前）、`added`（后来找到的例句序号）、`note` |
+| `error` | 代替 `final` | `code`：`timeout`、`coach_unavailable` 或教练错误码 |
+
+- 每个条目保留 `expression`、`key_phrase`、`note` 和 `citation`。
+- 拒绝（401、403、422 `invalid_input`、429 `coach_busy`）是普通 HTTP 错误，在任何行之前返回。
+- JSON 回复就是流最终会显示的答案。已找到核对通过的例句后，即使后续阶段失败，回复也会以 200 返回这些例句（此前为 503）。
+- 请求开始 280 秒后停止工作（Vercel 的 `maxDuration` 为 300 秒），错误码为 `timeout`。每个进程同时只处理一个请求。客户端离开后，工作会在下一次模型调用或检索前停止。
+
+#### 模式与请求日志（D5）
+
+- `COACH_SYSTEM` 为 `agent`（默认，加锁的 agent）或 `baseline`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`（只运行第一阶段，未经评估）。服务启动时读取一次，遇到其他值会拒绝启动，因此修改后需要重新部署。
+- 每个通过访问检查的请求都向 stdout 打印一行 JSON：`event`（`coach_request`）、`ts`、`request_id`、`mode`、`continuation_setting`、`transport`、`status`、`error_code`、`verified_first`、`added_final`、`verified_final`、`continuation`、`invariant_ok`、`first_ms`、`total_ms`、`llm_calls`、`searches`、`input_tokens`、`output_tokens`、`cached_input_tokens`、`disconnected`、`question_head`。
+- `question_head` 是问题的前 40 个字符（D2）。不记录场景和答案。首次看到答案的时间是 `first_ms`，为 `null` 时是 `total_ms`。
+- 保留期限就是 Vercel 运行日志的保留期限：Hobby 计划 1 小时，Pro 计划 1 天。请求的其他内容都不保存。字段含义见 `frontend/README.md`。
 
 #### 核对位置锁定与评估可重现性
 
@@ -409,12 +485,16 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 #### 已知差距
 
-- 学习端仍然只收到一次完成的回答。先发送已核对的例句（D1 的其余部分）尚未实现。
+- 尚未在真实部署或设备上检查：经过 Vercel 和 Android WebView 时是否逐行传输，以及后续阶段长时间无输出时的空闲超时（没有 ping 行）。
+- 已安装的 APK 仍使用 JSON 流程，重新构建 APK 之前不会提前显示结果。
+- 截止时间只在两次调用之间停止工作，已经开始的模型调用不会被中断。
 - 应用默认的 agent 是 D6 评估过的加锁 agent：通过率与 baseline 相同，不像加锁前的提交 agent 那样更好（判断题 R1）。
 
 ## 11. 项目负责人判断题
 
 **R1. D6 之后的提交说明和部署默认值：** 是否保留加锁的 agent 作为默认，并写明“准确率与 baseline 相同，另外能保留已发送的例句并跳过后续阶段”？建议：是，因为锁定兑现了 D1 的承诺，严格通过率的差距不显著。其他选项：把默认改为 baseline（更便宜，结果相同），或只引用提交结果，把 D6 运行作为附录。
+
+本文件没有其他待决定的事项。后台查找期间如何处理新的教练提问，这一待决问题见 `frontend/README.md`（判断题 1）。
 
 早先的五个范围问题已由已交付的客户端回答：提问可附带可选场景；每个回答最多显示三个表达，附关键短语、说明和播客出处；收藏和历史保存在设备上；话题范围取决于播客语料。
 
@@ -422,7 +502,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 # AI 영어 말하기 표현 Agent — 설계 문서
 
-> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다. 책임자 결정 D1(검증 슬롯 잠금)과 D6(재평가)은 학습 클라이언트 절에 기록합니다.
+> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다. 책임자 결정 D1–D3, D5, D6(검증된 예문 먼저 보내기, 검증 슬롯 잠금, 요청 로그, 재평가)은 학습 클라이언트 절에 기록합니다.
 
 ### 현재 최소 Demo 슬라이스
 
@@ -539,6 +619,8 @@ flowchart TD
 
 검색 응답은 `matched`, `needs_clarification`, `no_match` 결과를 구분해야 합니다. 클라이언트가 보낸 사용자 ID를 신원 증명으로 사용하지 않습니다.
 
+실제로 제공한 학습자 API는 이 개요와 다릅니다. `{question, context}`를 받아 출처가 붙은 표현과 안내 문구를 JSON 응답 하나 또는 단계별 NDJSON 줄로 돌려줍니다(학습 클라이언트 절의 API 참고).
+
 ## 8. 평가와 검수 기준
 
 다르게 바꿔 말한 표현, 의미가 모호한 경우, 맥락에 따라 달라지는 표현, 여러 주제 영역, 라이브러리에 적합한 결과가 없는 경우를 포함하는 고정된 중국어 질의 세트를 만듭니다. 초기 제안 규모는 질의 30–50개이며, 시간과 데이터에 맞춰 조정합니다.
@@ -588,14 +670,48 @@ flowchart TD
 
 Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
-#### 책임자 결정 D1과 D6
+#### 책임자 결정 D1–D3, D5, D6
 
-2026-11-21에 확정했다. 아래 절들은 D1의 코치 부분을 구현하고 D6을 준비한다.
+2026-11-21에 확정했다. 아래 절들은 D1–D3과 D5를 구현하고 D6을 준비한다.
 
 | ID | 결정 |
 |---|---|
 | D1 | 첫 단계에서 검증된 예문이 1개 이상이면 검증된 표현과 예문만 즉시 보낸다. 보낸 것은 이후 바뀌지 않는다. 후속 단계(baseline 또는 agent)는 빈 슬롯만 채운다. 3개 모두 검증되면 두 시스템 모두 후속 단계를 실행하지 않는다. 하나도 검증되지 않으면 끝난 답을 한 번에 보낸다. |
+| D2 | 학교 프로젝트이므로 질문을 원문 그대로 보여 주고 보관해도 된다. |
+| D3 | 사용자를 구분하지 않는다. 데이터는 요청 단위다. |
+| D5 | 운영 저장소를 두지 않는다. 모드는 환경변수와 재배포로 바꾼다. 실제 요청은 저장하지 않고 요청마다 로그 한 줄만 남긴다. 학습자가 화면을 떠나면 남은 결과를 서버에서 다시 받을 수 없다. |
 | D6 | 잠금을 구현한 뒤 로컬에서 실제 API로 baseline과 잠금 agent를 다시 평가한다(50과제 × 3회, 이어서 심사, 약 $6). |
+
+#### 검증된 결과 먼저 보내기(D1)
+
+- 빈 슬롯은 검증된 예문이 없는 슬롯이다. 먼저 보내는 결과에는 검증된 표현과 그 예문만 담고, 검증되지 않은 후보는 미리 보내지 않는다.
+- 보낸 것이 최종이다. 최종 답은 보낸 항목을 바꾸지 않은 채 그 항목으로 시작한다. 만약 이 규칙이 깨지면 서버는 보낸 항목을 앞에 두고 로그에 `invariant_ok: false`를 남긴다.
+- 학습자는 처음 예문을 바로 본다. 후속 단계가 도는 동안 채팅 위 공지가 팟캐스트 예문을 더 찾는 중이며, 이 화면을 열어 두면 끝날 때 알려 준다고 안내한다. 나중에 찾은 예문은 배지가 붙는 새 **팟캐스트** 탭으로 가고, 채팅의 답은 바뀌지 않는다.
+- 학습자가 화면을 떠나도 처음 예문은 기기 기록에 남고, 다시 열면 앱이 **다시 찾기**를 제안한다(D5).
+- 채팅 화면은 지금의 브랜드를 유지한다. 새로 생기는 것은 공지, 빈 자리, 기다린 시간, 팟캐스트 탭이다. 채팅 화면에도 탭을 보여 주므로 팟캐스트 탭의 배지를 바로 보고 누를 수 있다. 공지와 빈 자리도 그곳으로 연결한다.
+- 되돌릴 수 있는 기본값: 서버가 프로세스당 요청 하나만 처리하므로, 백그라운드 검색 중에는 새 코치 질문이 기다린다. 전체 상태 표는 `frontend/README.md`에 있다.
+
+#### API: POST /api/search
+
+요청은 `{question, context}`다. 기본 응답은 지금처럼 JSON 객체 하나(`{expressions, note}`)이므로 설치된 APK도 그대로 동작한다. 클라이언트가 `Accept: application/x-ndjson`을 보내면 줄마다 JSON 객체 하나를 받는다.
+
+| 줄 | 언제 | 필드 |
+|---|---|---|
+| `first` | 첫 단계에서 예문 1~3개가 검증됨 | `expressions`(검증된 항목만), `pending`(`false`면 뒤에 오는 것이 없음), `note` |
+| `final` | 후속 단계가 끝난 뒤. 검증된 예문이 없거나 요청이 거절되면 이 줄만 온다 | `expressions`(전체 답, 보낸 항목이 앞), `added`(나중에 찾은 예문의 번호), `note` |
+| `error` | `final` 대신 | `code`: `timeout`, `coach_unavailable` 또는 코치 오류 코드 |
+
+- 각 항목의 키는 `expression`, `key_phrase`, `note`, `citation`으로 기존과 같다.
+- 거절(401, 403, 422 `invalid_input`, 429 `coach_busy`)은 일반 HTTP 오류이며 어떤 줄보다 먼저 온다.
+- JSON 응답은 스트림이 마지막에 보여 줄 답과 같다. 검증된 예문을 찾은 뒤 후속 단계가 실패하면 그 예문을 200으로 돌려준다(이번 변경 전에는 503).
+- 작업은 요청 시작 280초 뒤에 오류 코드 `timeout`으로 멈춘다(Vercel의 `maxDuration`은 300초). 프로세스당 요청 하나만 처리한다. 클라이언트가 떠나면 작업은 다음 모델 호출이나 검색 전에 멈춘다.
+
+#### 모드와 요청 로그(D5)
+
+- `COACH_SYSTEM`은 `agent`(기본값, 잠금 agent) 또는 `baseline`이다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`(첫 단계만 실행, 평가되지 않음)다. 서버는 시작할 때 두 값을 한 번 읽고, 다른 값이면 시작하지 않는다. 그래서 바꾸려면 다시 배포해야 한다.
+- 접근 검사를 통과한 요청마다 stdout에 JSON 한 줄을 출력한다: `event`(`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`.
+- `question_head`는 질문의 앞 40자다(D2). 맥락과 답은 남기지 않는다. 첫 답을 보는 시간은 `first_ms`이고, `null`이면 `total_ms`다.
+- 보존 기간은 Vercel 런타임 로그의 보존 기간(Hobby 1시간, Pro 1일)이다. 그 밖의 요청 내용은 저장하지 않는다. 필드의 뜻은 `frontend/README.md`에 있다.
 
 #### 검증 슬롯 잠금과 평가 재현성
 
@@ -620,11 +736,15 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 #### 알려진 차이
 
-- 학습 클라이언트는 아직 끝난 답 하나만 받는다. 검증된 예문 먼저 보내기(D1의 나머지)는 아직 구현하지 않았다.
+- 실제 배포나 기기에서 아직 확인하지 않은 것: Vercel과 Android WebView를 거칠 때 줄 단위로 바로 전달되는지, 후속 단계가 오래 조용할 때의 유휴 타임아웃(ping 줄 없음).
+- 설치된 APK는 JSON 흐름을 그대로 쓰므로, APK를 다시 빌드하기 전에는 결과를 먼저 보여 주지 않는다.
+- 마감은 호출과 호출 사이에서만 작업을 멈춘다. 이미 진행 중인 모델 호출은 끊지 않는다.
 - 앱의 기본 agent는 D6에서 측정한 잠금 agent다. 통과율은 baseline과 같고, 잠금 전 제출 agent처럼 더 낫지는 않다(판단 질문 R1).
 
 ## 11. 프로젝트 책임자 판단 질문
 
 **R1. D6 이후 제출 서술과 배포 기본값:** 잠금 agent를 기본으로 두고 "정확도는 baseline과 같고, 보낸 예문 유지와 후속 생략을 얻는다"고 적을까요? 추천: 예. 잠금이 D1의 약속을 지키고 strict 차이는 유의하지 않기 때문입니다. 다른 선택지: 기본값을 baseline으로 바꾸기(더 싸고 결과가 같음), 또는 제출 결과만 근거로 쓰고 D6 실행은 부록으로 두기.
+
+이 문서에는 이 밖에 지금 결정할 사항이 없습니다. 백그라운드 검색 중 새 코치 질문을 어떻게 할지는 `frontend/README.md`의 판단 질문 1에 있습니다.
 
 예전의 범위 질문 다섯 개는 제공한 클라이언트로 정해졌습니다. 질문에는 선택적 맥락을 붙일 수 있고, 답은 표현을 최대 세 개까지 핵심 구절·설명·팟캐스트 출처와 함께 보여 주며, 저장과 기록은 기기에 남고, 주제는 팟캐스트 코퍼스를 따릅니다.

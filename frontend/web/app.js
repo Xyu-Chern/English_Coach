@@ -14,6 +14,8 @@ const symbols = {
   social: '<path d="M2 4h14v10H8l-4 3v-3H2zM18 8h4v11h-2v2l-5-3h-5v-2"/>',
   work: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V4h8v3M3 12c4 3 14 3 18 0M10 13h4"/>',
   sound: '<path d="M3 10v4m3-7v10m3-13v16m3-11v6m3-10v14m3-12v10m3-7v4"/>',
+  podcast:
+    '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/>',
   search: '<circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/>',
   back: '<path d="m14 5-7 7 7 7"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
@@ -68,6 +70,12 @@ let libraryFilter = "all",
   pending = false,
   failed = "",
   listError = false;
+// Staged answers (D1): the first verified examples arrive at once; a background search may add
+// more. notice = {kind, id} is the banner above the chat; running holds the ids still searching.
+let notice = null;
+const running = new Set();
+const RUNNING_LIMIT = 1; // the server answers one request per process, so wait for the search to end
+const SLOW_SECONDS = 30; // after this the wait line says the examples take a little longer
 const app = $("app"),
   dialog = $("dialog");
 function go(path) {
@@ -113,6 +121,7 @@ function frame(tab) {
     ["home", "home", T("练习台", "연습")],
     ["library", "library", T("表达库", "표현 모음")],
     ["book", "book", T("学习本", "학습 노트")],
+    ["podcast", "podcast", T("播客", "팟캐스트")],
   ]
     .map(
       ([id, s, name]) =>
@@ -122,7 +131,16 @@ function frame(tab) {
         (tab === id ? 'aria-current="page"' : "") +
         ">" +
         icon(s) +
+        '<span class="nav-label">' +
         esc(name) +
+        (id === "podcast"
+          ? '<span class="pod-mark" id="pod-mark">' +
+            podMark() +
+            '</span><span class="sr-only" id="pod-said">' +
+            podSaid() +
+            "</span>"
+          : "") +
+        "</span>" +
         "</a>",
     )
     .join("");
@@ -166,8 +184,9 @@ function home() {
         "</div>" +
         '<div class="assistant-message">' +
         turn.expressions.map(resultCard).join("") +
+        more(turn) +
         (turn.note ? "<p>" + esc(turn.note) + "</p>" : "") +
-        (!turn.expressions.length && !turn.note
+        (!turn.expressions.length && !turn.note && !turn.stage
           ? T(
               "表达库里还没有匹配项。可以换个关键词或问教练。",
               "일치하는 표현이 없어요. 다른 검색어나 코치 질문을 사용해 보세요.",
@@ -176,16 +195,20 @@ function home() {
         "</div>",
     )
     .join("");
+  const [waitText, waitTime] = waitingLine();
   const status =
     pending || failed
       ? '<div class="user-message">' +
         esc(lastQuestion) +
         "</div>" +
         (pending
-          ? '<div class="waiting" role="status">' +
+          ? '<div class="waiting">' +
             mascot(true) +
-            T("正在查找表达…", "표현을 찾고 있어요…") +
-            "</div>"
+            '<span id="wait-text">' +
+            waitText +
+            '</span><span class="wait-time" id="wait-time">' +
+            waitTime +
+            "</span></div>"
           : '<div class="status error" role="alert">' +
             esc(failedMessage()) +
             " <button data-retry>" +
@@ -230,10 +253,11 @@ function home() {
     '</div><button type="submit" class="send" aria-label="' +
     T("发送", "보내기") +
     '" ' +
-    (pending || (staticOnly && mode === "coach" && !read("server", ""))
-      ? "disabled"
-      : "") +
-    ">↑</button></div></form>" +
+    (sendBlocked() ? "disabled" : "") +
+    ">↑</button></div>" +
+    '<p class="hold" id="hold">' +
+    (holding() ? holdText() : "") +
+    "</p></form>" +
     (mode === "coach" && staticOnly && !read("server", "")
       ? '<p class="cloud-pending" role="status">' +
         T(
@@ -244,6 +268,274 @@ function home() {
       : "") +
     libraryStatus() +
     "</section>"
+  );
+}
+// ------------------------------------------------------------ staged answers (D1)
+function holding() {
+  return mode === "coach" && running.size >= RUNNING_LIMIT;
+}
+function sendBlocked() {
+  return (
+    pending ||
+    holding() ||
+    (staticOnly && mode === "coach" && !read("server", ""))
+  );
+}
+function holdText() {
+  return T(
+    "上一条的例句查找结束后即可发送",
+    "앞 질문의 예문 찾기가 끝나면 보낼 수 있어요",
+  );
+}
+let waitStart = 0,
+  waitTick = 0;
+function waitingLine() {
+  const s = Math.max(0, Math.floor((Date.now() - waitStart) / 1000));
+  return [
+    s >= SLOW_SECONDS
+      ? T("还在核对例句，需要多一点时间…", "예문을 찾느라 조금 더 걸려요…")
+      : T("正在查找表达…", "표현을 찾고 있어요…"),
+    T(s + " 秒", s + "초"),
+  ];
+}
+function startWaiting() {
+  waitStart = Date.now();
+  clearInterval(waitTick);
+  waitTick = setInterval(() => {
+    const text = $("wait-text"),
+      time = $("wait-time");
+    if (!text || !time) return;
+    const [line, seconds] = waitingLine();
+    if (text.textContent !== line) text.textContent = line;
+    time.textContent = seconds;
+  }, 1000);
+}
+function stopWaiting() {
+  clearInterval(waitTick);
+}
+function findEntry(id) {
+  return (
+    history.find((h) => h && h.id === id) || turns.find((t) => t.id === id)
+  );
+}
+function unseen() {
+  return history.reduce(
+    (n, h) =>
+      n + (h && h.seen === false && Array.isArray(h.added) ? h.added.length : 0),
+    0,
+  );
+}
+function podMark() {
+  const n = unseen();
+  if (n)
+    return '<span class="badge" aria-hidden="true">' + (n > 9 ? "9+" : n) + "</span>";
+  return running.size ? '<span class="dot" aria-hidden="true"></span>' : "";
+}
+function podSaid() {
+  const n = unseen();
+  if (n) return T("，" + n + " 条新例句", ", 새 예문 " + n + "개");
+  return running.size ? T("，查找中", ", 찾는 중") : "";
+}
+function paintNav() {
+  const mark = $("pod-mark"),
+    said = $("pod-said");
+  if (mark) mark.innerHTML = podMark();
+  if (said) said.textContent = podSaid();
+}
+function paintComposer() {
+  const send = document.querySelector("#ask .send"),
+    hold = $("hold");
+  if (send) send.disabled = sendBlocked();
+  if (hold) hold.textContent = holding() ? holdText() : "";
+}
+// The live region speaks only when an answer arrives: the first examples and the end of the search.
+function say(text) {
+  const live = $("announce");
+  live.textContent = "";
+  setTimeout(() => (live.textContent = text), 60);
+}
+// The empty slot under a staged answer: searching, then a pointer to what the search added.
+function more(e, onPage = false) {
+  if (!e.stage) return "";
+  const n = Array.isArray(e.added) ? e.added.length : 0,
+    text = (s) => '<span class="more-text">' + s + "</span>";
+  let kind, body;
+  if (e.stage === "pending") {
+    kind = "pending";
+    body =
+      '<span class="spinner" aria-hidden="true"></span>' +
+      text(T("空位 · 正在查找播客例句", "빈 자리 · 팟캐스트 예문 찾는 중"));
+  } else if (n) {
+    if (onPage) return "";
+    kind = "added";
+    body =
+      icon("podcast") +
+      text(T("已在播客页新增 " + n + " 条例句", "팟캐스트 탭에 예문 " + n + "개를 더했어요")) +
+      '<a href="#podcast">' +
+      T("查看", "보기") +
+      "</a>";
+  } else if (e.stage === "done") {
+    kind = "none";
+    body = text(T("这次没有找到更多例句", "이번에는 예문을 더 찾지 못했어요"));
+  } else {
+    kind = "none";
+    body =
+      text(T("例句查找已中断", "예문 찾기가 중단됐어요")) +
+      '<button type="button" data-again="' +
+      esc(e.id) +
+      '">' +
+      T("重新查找", "다시 찾기") +
+      "</button>";
+  }
+  return (
+    '<div class="more ' + kind + '" id="more-' + esc(e.id) + '">' + body + "</div>"
+  );
+}
+function paintMore(e) {
+  const slot = $("more-" + e.id);
+  if (slot) slot.outerHTML = more(e, !document.body.classList.contains("chat-home"));
+}
+function renderNotice() {
+  const box = $("notice"),
+    e = notice && findEntry(notice.id);
+  if (!e) {
+    notice = null;
+    box.hidden = true;
+    box.className = "";
+    box.innerHTML = "";
+    return;
+  }
+  const n = Array.isArray(e.added) ? e.added.length : 0,
+    again =
+      '<button type="button" data-again="' +
+      esc(e.id) +
+      '">' +
+      T("重新查找", "다시 찾기") +
+      "</button>";
+  const [lead, title, line, actions] = {
+    running: [
+      '<span class="spinner" aria-hidden="true"></span>',
+      T("正在查找更多播客例句", "팟캐스트 예문을 더 찾는 중"),
+      T("保持此页面打开，找到后会告诉你", "이 화면을 열어 두면 끝날 때 알려드릴게요"),
+      "",
+    ],
+    added: [
+      icon("check"),
+      T("又找到 " + n + " 条播客例句", "팟캐스트 예문 " + n + "개를 더 찾았어요"),
+      "",
+      '<a href="#podcast">' + icon("podcast") + T("在播客页查看", "팟캐스트 탭에서 보기") + "</a>",
+    ],
+    none: [
+      icon("check"),
+      T("这次没有找到更多播客例句", "이번에는 팟캐스트 예문을 더 찾지 못했어요"),
+      T("先前的结果可以照常使用", "처음 결과는 그대로 쓸 수 있어요"),
+      "",
+    ],
+    stopped: [
+      icon("podcast"),
+      T("查找更多例句时中断了", "예문을 더 찾다가 중단됐어요"),
+      T("现有结果可以照常使用", "지금 결과는 그대로 쓸 수 있어요"),
+      again,
+    ],
+    reentry: [
+      icon("podcast"),
+      T("你离开期间，例句查找已停止", "자리를 비운 사이 예문 찾기가 멈췄어요"),
+      T("先前的结果仍然保留", "처음 결과는 그대로 있어요"),
+      '<button type="button" data-open="' +
+        esc(e.id) +
+        '">' +
+        T("查看先前结果", "처음 결과 보기") +
+        "</button>" +
+        again,
+    ],
+  }[notice.kind];
+  box.hidden = false;
+  box.className = "notice " + notice.kind;
+  box.innerHTML =
+    '<div class="notice-card"><span class="notice-lead">' +
+    lead +
+    '</span><p class="notice-text"><b>' +
+    title +
+    "</b>" +
+    (line ? "<span> · " + line + "</span>" : "") +
+    "</p>" +
+    (notice.kind === "reentry"
+      ? '<p class="notice-q">' + esc(e.question) + "</p>"
+      : "") +
+    (actions ? '<div class="notice-actions">' + actions + "</div>" : "") +
+    (notice.kind === "running"
+      ? ""
+      : '<button type="button" class="icon-btn notice-close" data-notice-close aria-label="' +
+        T("关闭提示", "알림 닫기") +
+        '">' +
+        icon("close") +
+        "</button>") +
+    "</div>";
+}
+// The "podcast" tab: only the examples the background search added, grouped by question.
+function podcastPage() {
+  const groups = history.filter((h) => h && Array.isArray(h.added) && h.added.length),
+    fresh = new Set(groups.filter((h) => h.seen === false).map((h) => h.id)),
+    searching = history.filter((h) => h && running.has(h.id));
+  if (fresh.size) {
+    groups.forEach((h) => (h.seen = true));
+    storeList("history", history);
+  }
+  if (notice && notice.kind === "added") notice = null;
+  return (
+    "<h1>" +
+    T("播客例句", "팟캐스트 예문") +
+    '</h1><p class="sub">' +
+    T(
+      "这里按问题汇总聊天回答之后新找到的例句。聊天里先收到的回答不会改变。",
+      "채팅 답 뒤에 더 찾은 예문만 질문별로 모아요. 채팅에서 먼저 받은 답은 그대로예요.",
+    ) +
+    "</p>" +
+    searching
+      .map(
+        (h) =>
+          '<p class="status pod-running"><span class="spinner" aria-hidden="true"></span>' +
+          T("查找中", "찾는 중") +
+          " · " +
+          esc(h.question) +
+          "</p>",
+      )
+      .join("") +
+    (groups.length
+      ? groups
+          .map(
+            (h) =>
+              '<section class="pod-group' +
+              (fresh.has(h.id) ? " fresh" : "") +
+              '"><h2 class="pod-q">' +
+              esc(h.question) +
+              '</h2><p class="pod-meta">' +
+              (fresh.has(h.id)
+                ? '<span class="chip-new">' + T("新增", "새로 추가") + "</span>"
+                : "") +
+              "<span>" +
+              T(
+                "新找到 " + h.added.length + " 条例句",
+                "새로 찾은 예문 " + h.added.length + "개",
+              ) +
+              "</span><span>" +
+              T(
+                "聊天里先收到的 " + h.expressions.length + " 条保持不变",
+                "채팅에서 먼저 받은 " + h.expressions.length + "개는 그대로예요",
+              ) +
+              "</span></p>" +
+              h.added.map(resultCard).join("") +
+              "</section>",
+          )
+          .join("")
+      : searching.length
+        ? ""
+        : '<div class="empty">' +
+          T(
+            "还没有新找到的例句。向教练提问后，先前回答之后找到的例句会汇总在这里。",
+            "아직 더 찾은 예문이 없어요. 코치에게 질문하면 처음 답 뒤에 더 찾은 예문이 여기에 모여요.",
+          ) +
+          "</div>")
   );
 }
 function libraryStatus() {
@@ -394,7 +686,7 @@ function resultPage() {
   if (pending && !active)
     return (
       head +
-      '<div class="status" role="status"><span class="spinner"></span>' +
+      '<div class="status"><span class="spinner"></span>' +
       T(
         "教练正在找表达、核对字幕。你可以先浏览表达库。",
         "코치가 표현을 찾고 자막을 확인하고 있어요. 표현 모음을 먼저 둘러봐도 돼요.",
@@ -435,8 +727,16 @@ function resultPage() {
         )) +
     "</p>" +
     active.expressions.map(resultCard).join("") +
+    (Array.isArray(active.added) && active.added.length
+      ? '<h2 class="more-head">' +
+        icon("podcast") +
+        T("之后找到的播客例句", "팟캐스트에서 더 찾은 예문") +
+        "</h2>" +
+        active.added.map(resultCard).join("")
+      : "") +
+    more(active, true) +
     (active.note ? '<p class="status">' + esc(active.note) + "</p>" : "") +
-    (!active.expressions.length && !active.note
+    (!active.expressions.length && !active.note && !active.stage
       ? '<p class="empty">' +
         T(
           "没有找到合适的表达，试试补充场景或问在线教练。",
@@ -507,24 +807,37 @@ function notebook() {
             .join(""))
   );
 }
+// The question box sticks to the bottom of the chat unless it (with the phone tabs) would cover
+// too much of a short or text-zoomed screen; then it stays at the end of the conversation.
+function fitComposer() {
+  const form = $("ask"),
+    nav = $("nav");
+  if (!form) return;
+  const tabs = getComputedStyle(nav).position === "fixed" ? nav.offsetHeight : 0;
+  document.body.classList.toggle(
+    "loose-compose",
+    form.offsetHeight + tabs > innerHeight * 0.4,
+  );
+}
+const composeFit = "ResizeObserver" in window ? new ResizeObserver(fitComposer) : null;
+window.addEventListener("resize", fitComposer);
 function render() {
   visible = [];
   const page = location.hash.slice(1) || "home",
     id = page.slice(5);
+  // Keep the learner's place in the question box when an answer redraws the page.
+  const typing = document.activeElement && document.activeElement.id === "question"
+    ? [document.activeElement.selectionStart, document.activeElement.selectionEnd]
+    : null;
   document.body.classList.toggle("chat-home", page === "home");
-  frame(
-    page === "book"
-      ? "book"
-      : page === "library" || page.startsWith("card/")
-        ? "library"
-        : "home",
-  );
-  if (page === "library") app.innerHTML = shelf();
-  else if (page === "book") app.innerHTML = notebook();
-  else if (page === "answer") app.innerHTML = resultPage();
+  let html;
+  if (page === "library") html = shelf();
+  else if (page === "book") html = notebook();
+  else if (page === "answer") html = resultPage();
+  else if (page === "podcast") html = podcastPage();
   else if (page.startsWith("card/")) {
     const e = library.find((x) => x.id === id);
-    app.innerHTML =
+    html =
       back("library") +
       (e
         ? '<h1 class="answer-title">' +
@@ -536,7 +849,27 @@ function render() {
         : '<p class="empty">' +
           T("找不到这张表达卡。", "이 표현 카드를 찾을 수 없어요.") +
           "</p>");
-  } else app.innerHTML = home();
+  } else html = home();
+  frame(
+    page === "book" || page === "podcast"
+      ? page
+      : page === "library" || page.startsWith("card/")
+        ? "library"
+        : "home",
+  );
+  app.innerHTML = html;
+  renderNotice();
+  if (composeFit) {
+    composeFit.disconnect();
+    if ($("ask")) composeFit.observe($("ask"));
+  }
+  const box = typing && $("question");
+  if (box) {
+    box.focus({ preventScroll: true });
+    try {
+      box.setSelectionRange(typing[0], typing[1]);
+    } catch {}
+  }
 }
 const isAndroid =
   location.origin === "http://localhost" && /; wv\)/.test(navigator.userAgent);
@@ -562,6 +895,10 @@ function failedMessage() {
       "다른 질문을 처리 중이에요. 잠시 후 다시 시도하세요.",
     ),
     invalid: T("请缩短问题后再试。", "질문을 짧게 줄여 주세요."),
+    timeout: T(
+      "这次没能及时找到回答，请稍后再试。",
+      "시간 안에 답을 찾지 못했어요. 잠시 뒤 다시 시도해 주세요.",
+    ),
     service: T(
       "教练服务暂时不可用。可以先离线浏览表达库。",
       "코치 서비스에 지금 연결할 수 없어요. 오프라인 표현 모음을 이용할 수 있어요.",
@@ -600,68 +937,252 @@ function localAnswer(q, c) {
     .filter((row) => row.score >= ranked[0].score / 2)
     .map((row) => row.item);
 }
-async function ask(resumeId = null) {
+const STREAM = "application/x-ndjson";
+const CLIENT_LIMIT_MS = 300000; // the server ends a request 280 s after it starts
+function uid() {
+  return self.crypto && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+function verified(e) {
+  return Boolean(e && e.citation && typeof e.citation.quote === "string");
+}
+function expressionList(list) {
+  return Array.isArray(list)
+    ? list.filter((e) => e && typeof e.expression === "string" && e.expression)
+    : [];
+}
+// One NDJSON object per line, as the server writes them; blank lines are skipped.
+async function* ndjson(body) {
+  const reader = body.getReader(),
+    decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      if (buffer.length > 1000000) throw new Error("service");
+      let cut;
+      while ((cut = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, cut).trim();
+        buffer = buffer.slice(cut + 1);
+        if (line) yield JSON.parse(line);
+      }
+      if (done) {
+        if (buffer.trim()) yield JSON.parse(buffer);
+        return;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+// A finished first answer: it goes into the chat and the device history at once.
+function answered(req, expressions, note, extra = {}) {
+  const entry = {
+    id: uid(),
+    question: req.q,
+    context: req.c,
+    sent: req.sent,
+    expressions,
+    note: note || null,
+    ...extra,
+  };
+  history = [entry, ...history].slice(0, 35);
+  storeList("history", history);
+  if (ticket === req.ticket) {
+    active = entry;
+    turns.push(entry);
+  }
+  pending = false;
+  stopWaiting();
+  if (entry.stage === "pending") {
+    running.add(entry.id);
+    notice = { kind: "running", id: entry.id };
+  }
+  say(
+    entry.stage === "pending"
+      ? T(
+          "先显示已核对的 " + expressions.length + " 条例句，正在查找更多播客例句。",
+          "확인된 예문 " + expressions.length + "개를 먼저 보여 드려요. 팟캐스트 예문을 더 찾는 중이에요.",
+        )
+      : expressions.length
+        ? T("回答已送达，共 " + expressions.length + " 个表达。", "답변이 도착했어요. 표현 " + expressions.length + "개.")
+        : T("回答已送达。", "답변이 도착했어요."),
+  );
+  render();
+  if (document.body.classList.contains("chat-home"))
+    document.querySelector("#ask")?.scrollIntoView({ block: "nearest" });
+  return entry;
+}
+// The background search ended: keep the first examples, add what it verified, tell the learner.
+function settle(entry, stage, added = []) {
+  entry.stage = stage;
+  entry.added = added;
+  entry.seen = !added.length;
+  running.delete(entry.id);
+  if (history.includes(entry)) storeList("history", history);
+  notice = {
+    kind: added.length ? "added" : stage === "done" ? "none" : "stopped",
+    id: entry.id,
+  };
+  say(
+    added.length
+      ? T(
+          "又找到 " + added.length + " 条播客例句，可在播客页查看。",
+          "팟캐스트 예문 " + added.length + "개를 더 찾았어요. 팟캐스트 탭에서 볼 수 있어요.",
+        )
+      : stage === "done"
+        ? T("这次没有找到更多播客例句。", "이번에는 팟캐스트 예문을 더 찾지 못했어요.")
+        : T(
+            "查找更多例句时中断了，现有结果可以照常使用。",
+            "예문을 더 찾다가 중단됐어요. 지금 결과는 그대로 쓸 수 있어요.",
+          ),
+  );
+  // Redraw only what shows the search; a full redraw would take the learner's place in a text box.
+  const page = location.hash.slice(1) || "home";
+  if (["podcast", "answer", "book"].includes(page)) render();
+  else {
+    paintMore(entry);
+    paintComposer();
+    paintNav();
+    renderNotice();
+  }
+}
+// Accept: NDJSON. first: the verified examples (final); final: the whole answer, of which only the
+// examples at the added indexes are new; error: the search ended. A first that is still pending
+// leaves its empty slots to the background search; unverified candidates are never shown after it.
+async function staged(r, req) {
+  let entry = null;
+  try {
+    for await (const ev of ndjson(r.body)) {
+      if (!ev || typeof ev !== "object") continue;
+      if (ev.type === "first" && !entry) {
+        const pendingMore = ev.pending === true;
+        entry = answered(
+          req,
+          expressionList(ev.expressions).filter(verified),
+          ev.note,
+          pendingMore ? { stage: "pending", added: [] } : {},
+        );
+        if (!pendingMore) return;
+      } else if (ev.type === "final") {
+        const all = Array.isArray(ev.expressions) ? ev.expressions : [];
+        if (!entry) {
+          answered(req, expressionList(all), ev.note);
+          return;
+        }
+        const shown = new Set(entry.expressions.map(key)),
+          added = [];
+        for (const i of Array.isArray(ev.added) ? ev.added : []) {
+          const e = Number.isInteger(i) ? all[i] : null;
+          if (expressionList([e]).length && verified(e) && !shown.has(key(e))) {
+            shown.add(key(e));
+            added.push(e);
+          }
+        }
+        settle(entry, "done", added);
+        return;
+      } else if (ev.type === "error") {
+        if (!entry)
+          throw new Error(
+            { timeout: "timeout", invalid_input: "invalid", coach_busy: "busy" }[ev.code] || "service",
+          );
+        settle(entry, "stopped");
+        return;
+      }
+    }
+    if (!entry) throw new Error("net");
+    settle(entry, "stopped");
+  } catch (err) {
+    if (!entry) throw err;
+    if (entry.stage === "pending") settle(entry, "stopped");
+  }
+}
+// again: a stored staged answer to look for once more with its question and the context it sent.
+async function ask(resumeId = null, again = null) {
+  const how = again ? "coach" : mode;
   if (
-    !draft.trim() ||
+    (!again && !draft.trim()) ||
     pending ||
-    (staticOnly && mode === "coach" && !read("server", ""))
+    (staticOnly && how === "coach" && !read("server", ""))
   )
     return;
-  if (mode === "coach" && isAndroid && !apiBase()) {
+  if (how === "coach" && running.size >= RUNNING_LIMIT) {
+    toast(holdText());
+    return;
+  }
+  if (how === "coach" && isAndroid && !apiBase()) {
     settings();
     return;
   }
   const myTicket = ++ticket,
-    q = draft.trim(),
-    c = context.trim();
+    q = again ? again.question : draft.trim(),
+    c = again ? again.context || "" : context.trim();
   lastQuestion = q;
   lastContext = c;
-  draft = "";
-  context = "";
+  if (!again) {
+    draft = "";
+    context = "";
+  }
   pending = true;
   active = null;
   failed = "";
+  if (notice && notice.kind !== "running") notice = null;
+  startWaiting();
   go("home");
   render();
   try {
-    if (mode === "local") {
-      const expressions = localAnswer(q, c);
-      const answer = {
-        question: q,
-        context: c,
-        expressions,
+    if (how === "local") {
+      answered({ q, c, sent: c, ticket: myTicket }, localAnswer(q, c), null, {
         local: true,
-        note: null,
-      };
-      active = answer;
-      turns.push(answer);
-      history = [answer, ...history].slice(0, 35);
-      storeList("history", history);
+      });
       return;
     }
     const headers = { "Content-Type": "application/json" };
     const code = privateServer(apiBase()) && read("access:" + apiBase(), "");
     if (code) headers["X-Coach-Code"] = code;
     const prior = turns[turns.length - 1];
-    const followup =
-      c ||
-      (prior
-        ? (
-            T("上一轮：", "직전 대화: ") +
-            prior.question.slice(0, 200) +
-            " / " +
-            (prior.expressions[0]?.expression || "").slice(0, 330)
-          ).slice(0, 600)
-        : "");
+    const followup = again
+      ? typeof again.sent === "string"
+        ? again.sent
+        : c
+      : c ||
+        (prior
+          ? (
+              T("上一轮：", "직전 대화: ") +
+              prior.question.slice(0, 200) +
+              " / " +
+              (prior.expressions[0]?.expression || "").slice(0, 330)
+            ).slice(0, 600)
+          : "");
     const endpoint = apiBase() + "/api/search";
-    let r = resumeId
-      ? null
-      : await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ question: q, context: followup }),
-          referrerPolicy: "no-referrer",
-        });
+    // Ask for the staged stream; a server without it (an older one, the relay) answers in JSON.
+    const stop = new AbortController(),
+      limit = setTimeout(() => stop.abort(), CLIENT_LIMIT_MS);
+    let r;
+    try {
+      r = resumeId
+        ? null
+        : await fetch(endpoint, {
+            method: "POST",
+            headers: { ...headers, Accept: STREAM + ", application/json;q=0.9" },
+            body: JSON.stringify({ question: q, context: followup }),
+            referrerPolicy: "no-referrer",
+            signal: stop.signal,
+          });
+      if (
+        r &&
+        r.ok &&
+        r.body &&
+        (r.headers.get("Content-Type") || "").toLowerCase().startsWith(STREAM)
+      ) {
+        await staged(r, { q, c, sent: followup, ticket: myTicket });
+        return;
+      }
+    } finally {
+      clearTimeout(limit);
+    }
     const jobId = resumeId || (r.status === 202 ? (await r.json()).id : null);
     if (jobId) {
       if (!/^[a-f0-9-]{36}$/.test(jobId)) throw new Error("service");
@@ -694,34 +1215,31 @@ async function ask(resumeId = null) {
       );
     const data = await r.json();
     if (!Array.isArray(data.expressions)) throw new Error("service");
-    const answer = {
-      question: q,
-      context: c,
-      expressions: data.expressions,
-      note: data.note,
-    };
-    history = [answer, ...history].slice(0, 35);
-    storeList("history", history);
     if (jobId)
       fetch(endpoint + "/" + jobId, { method: "DELETE", headers }).catch(
         () => {},
       );
-    if (ticket === myTicket) {
-      active = answer;
-      turns.push(answer);
-    }
+    answered({ q, c, sent: followup, ticket: myTicket }, data.expressions, data.note);
   } catch (err) {
     if (ticket === myTicket)
-      failed = ["pair", "busy", "invalid", "service", "offline"].includes(
-        err.message,
-      )
-        ? err.message
-        : "net";
+      failed =
+        err.name === "AbortError"
+          ? "timeout"
+          : err.name === "SyntaxError"
+            ? "service"
+            : ["pair", "busy", "invalid", "service", "offline", "timeout"].includes(
+                err.message,
+              )
+            ? err.message
+            : "net";
   } finally {
-    pending = false;
-    render();
-    if (document.body.classList.contains("chat-home"))
-      document.querySelector("#ask")?.scrollIntoView({ block: "nearest" });
+    if (pending) {
+      pending = false;
+      stopWaiting();
+      render();
+      if (document.body.classList.contains("chat-home"))
+        document.querySelector("#ask")?.scrollIntoView({ block: "nearest" });
+    }
   }
 }
 function settings() {
@@ -873,13 +1391,23 @@ document.addEventListener("click", (e) => {
         : T("已收藏到学习本", "학습 노트에 저장했어요"),
     );
     render();
-  } else if ("history" in d) {
+  } else if ("history" in d || "open" in d) {
+    const entry =
+      "open" in d ? findEntry(d.open) : history[Number(d.history)];
+    if (!entry) return;
     ++ticket;
-    active = history[Number(d.history)];
+    active = entry;
     draft = active.question;
     context = active.context || "";
     failed = "";
     go("answer");
+  } else if ("again" in d) {
+    const entry = findEntry(d.again);
+    if (entry) ask(null, entry);
+  } else if ("noticeClose" in d) {
+    notice = null;
+    renderNotice();
+    app.focus({ preventScroll: true });
   } else if ("remove" in d) {
     history.splice(Number(d.remove), 1);
     storeList("history", history);
@@ -904,12 +1432,25 @@ function readPhoneLink() {
 }
 async function start() {
   readPhoneLink();
+  // Phones show the tabs fixed at the bottom; the page keeps their real height free (large text wraps them).
+  if ("ResizeObserver" in window)
+    new ResizeObserver(() =>
+      document.documentElement.style.setProperty("--nav-h", $("nav").offsetHeight + "px"),
+    ).observe($("nav"));
   try {
     const r = await fetch("./library.json");
     if (!r.ok) throw Error();
     library = await r.json();
   } catch {
     listError = true;
+  }
+  // A background search does not survive leaving the page (nothing is kept on the server, D5):
+  // its first examples stay in the device history and the learner can look again.
+  const left = history.filter((h) => h && h.stage === "pending");
+  if (left.length) {
+    left.forEach((h) => (h.stage = "incomplete"));
+    storeList("history", history);
+    notice = { kind: "reentry", id: left[0].id };
   }
   render();
   const parked = JSON.parse(sessionStorage.getItem("coach-job") || "null");

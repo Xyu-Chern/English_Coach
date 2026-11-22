@@ -7,7 +7,8 @@ import re
 
 import numpy as np
 from evaluation.snapshot_search import SnapshotSearch
-from translation_agent_demo.agents import CoachDependencies, ExpressionCoach
+from frontend.staged import StagedCoach
+from translation_agent_demo.agents import CoachDependencies
 from translation_agent_demo.agents.contracts import CorpusSearchHit
 from translation_agent_demo.config import Settings
 from translation_agent_demo.providers import chat_model
@@ -77,8 +78,10 @@ def dependencies():
     return chat_model(Settings.from_environment()), local_client(), PublishedCorpus()
 
 
-def answer(question):
+def stream(question, mode, guard):
+    """The staged coach (frontend/staged.py) over the bundled snapshot, in the app's mode (COACH_SYSTEM,
+    COACH_CONTINUATION, read once by make_app)."""
     model, encoder, corpus = dependencies()
-    return ExpressionCoach(
-        CoachDependencies(model, SnapshotSearch(corpus, encoder))
-    ).answer(question)
+    return StagedCoach(
+        CoachDependencies(model, SnapshotSearch(corpus, encoder)), mode
+    ).stream(question, guard)
