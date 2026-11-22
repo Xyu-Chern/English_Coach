@@ -526,27 +526,37 @@ def detail_of(stage: str, d: dict, *, rich: bool, locked_slots: list[int] | None
     elif stage == "assemble":
         out.update(expressions=d.get("expressions"), with_example=d.get("with_example"))
     else:
-        out.update({k: v for k, v in d.items() if k != "shared" and not isinstance(v, (dict, list))})
+        out.update({k: v for k, v in d.items()
+                    if k not in ("shared", "started_ms") and not isinstance(v, (dict, list))})
     return compact(out)
 
 
+def started_at(span: dict) -> int | None:
+    """details.started_ms (when the step started, ms since the request started), if the trace recorded it."""
+    value = details(span).get("started_ms")
+    return ms(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
 def convert_trace(trace: list[dict], n_first: int, *, rich: bool, locked_slots: list[int] | None) -> list[dict]:
-    """Spans in order; start_ms is the running sum of the rounded elapsed times (gaps between spans are not recorded)."""
+    """Spans in order; start_ms is details.started_ms when recorded (parallel searches overlap), else the running
+    sum of the rounded elapsed times (gaps between spans are not recorded)."""
     spans, clock = [], 0
     for i, span in enumerate(trace):
         stage, d, first = span.get("stage") or "?", details(span), i < n_first
         status = ("error" if span.get("status") == "error" else
                   "noop" if stage == "continuation_skipped" or "noop" in d else "skipped" if "skipped" in d else "ok")
         elapsed = ms(span.get("elapsed_ms"))
+        start = started_at(span)
+        start = clock if start is None else start
         llm = "input_tokens" in d or "output_tokens" in d
         tin, tout = d.get("input_tokens") or 0, d.get("output_tokens") or 0
         spans.append({"id": f"s{i + 1:02d}", "stage": stage, "label": label_of(stage), "kind": kind_of(stage, d),
                       "phase": "first" if first else "continuation", "turn": turn_of(stage, first),
-                      "start_ms": clock, "elapsed_ms": elapsed, "status": status, "locked": is_locked(d),
+                      "start_ms": start, "elapsed_ms": elapsed, "status": status, "locked": is_locked(d),
                       "tokens": {"input": tin, "output": tout, "total": tin + tout} if llm else None,
                       "summary": summarize(stage, status, d, first),
                       "detail": detail_of(stage, d, rich=rich, locked_slots=None if first else locked_slots)})
-        clock += elapsed
+        clock = max(clock, start + elapsed)  # without started_ms: start = clock, the running sum
     return spans
 
 
@@ -581,7 +591,10 @@ def attempt_facts(row: dict) -> dict:
                       for e in expressions if e.get("citation")}
     sent_first = status in ("ok", "error") and bool(verified_first) and error_phase != "first"
     total = ms(result.get("elapsed_ms"))
-    first_stage_ms = sum(ms(s.get("elapsed_ms")) for s in first) if first else None
+    starts = [started_at(s) for s in first]
+    first_stage_ms = (None if not first else  # parallel searches overlap: with started_ms, the end of the last span
+                      max(start + ms(s.get("elapsed_ms")) for start, s in zip(starts, first)) if None not in starts
+                      else sum(ms(s.get("elapsed_ms")) for s in first))
     first_response = min(total, first_stage_ms) if sent_first and first_stage_ms is not None else total
     usage = result.get("usage") or {}
     tin, tout = usage.get("input_tokens") or 0, usage.get("output_tokens") or 0
@@ -741,7 +754,8 @@ def notes_for(env: dict) -> list[str]:
         "(요청당 구조화 로그 한 줄만 남긴다).",
         "첫 단계 = details.shared 스팬(없으면 validate_select_1·decline까지). verified_first = "
         "validate_select_1.details.verified. 평가에서는 두 시스템이 같은 단위의 첫 단계를 공유했다.",
-        "first_stage_ms = 첫 단계 스팬 elapsed 합(스팬 사이 오버헤드 제외). first_response_ms = 첫 단계 검증 예문이 "
+        "first_stage_ms = 첫 단계 스팬 elapsed 합(스팬 사이 오버헤드 제외). 스팬에 details.started_ms가 있으면"
+        "(병렬 검색 기록) 마지막 첫 단계 스팬의 끝(started_ms + elapsed). first_response_ms = 첫 단계 검증 예문이 "
         "1개 이상이면 first_stage_ms(그때 검증된 표현+예문만 먼저 보냄, D1), 0개·거절·첫 단계 오류면 total_ms"
         "(끝까지 기다려 한 번에 보냄). background_ms = total_ms − first_response_ms.",
         "total_ms = 기록된 요청 소요(result.elapsed_ms = 첫 단계 + 후속 세션). 평가 때 두 시스템의 후속은 동시에, "
@@ -754,7 +768,8 @@ def notes_for(env: dict) -> list[str]:
         "tokens = 채팅 모델 입력+출력(임베딩 제외). llm_calls = 채팅 모델 호출 수, searches = 검색 도구 호출 수. "
         "cost_usd = 공시 가격 기준 추정(meta.run.pricing_as_of).",
         "passed·strict_passed·grounded_good = LLM 심사 3표 다수결(사람 정답 아님). 심사가 없으면 null.",
-        "trace의 start_ms = 같은 요청 안 스팬 elapsed(반올림 ms)의 순차 누적. 스팬 사이 오버헤드는 빠져 있어 마지막 스팬 "
+        "trace의 start_ms = 스팬의 details.started_ms(요청 시작 기준, 병렬 검색은 겹쳐 보임)가 있으면 그 값, 없으면 "
+        "같은 요청 안 스팬 elapsed(반올림 ms)의 순차 누적. 누적일 때는 스팬 사이 오버헤드가 빠져 있어 마지막 스팬 "
         "끝 ≤ total_ms(반올림 오차 범위). detail에서 값이 없는 키는 생략했다.",
         f"평가 환경({env.get('model') or '-'} + {env.get('embedding_model') or '-'}, 스냅샷 "
         f"{env.get('snapshot_id') or '-'})은 배포 환경과 달라 절대 시간·토큰은 다를 수 있다.",

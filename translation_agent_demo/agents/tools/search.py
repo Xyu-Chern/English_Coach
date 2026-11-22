@@ -3,6 +3,7 @@
     search          one budgeted corpus search: passages containing the key phrase first
                     (meaning-similarity fallback); the spans are shown with refs
     search_slot     search for a slot's own expression; its spans feed the next selection
+    slot_searches   the searches search_slot would run for some slots, for session.prefetching
     identical_search  whether the same query and key phrase were searched before
 """
 
@@ -34,16 +35,27 @@ class SearchAction(FrozenModel):
     reason: str = ""
 
 
+def search_args(draft: Draft, query: str, key_phrase: str | None) -> SearchCorpusArgs:
+    """The corpus search for a query and key phrase in this draft (its show, if the request named one)."""
+    return SearchCorpusArgs(query=query, literal_phrase=normalize_phrase(key_phrase), limit=PASSAGES_PER_SEARCH,
+                            feed_ids=draft.feeds)
+
+
 def search(session: RequestSession, draft: Draft, *, stage: str, ref_prefix: str, query: str,
            key_phrase: str | None, slot: int | None, policy: str, **details) -> Observation:
     """Passages containing the key phrase first (meaning-similarity fallback); spans shown with refs."""
-    phrase = normalize_phrase(key_phrase)
-    args = SearchCorpusArgs(query=query, literal_phrase=phrase, limit=PASSAGES_PER_SEARCH, feed_ids=draft.feeds)
+    args = search_args(draft, query, key_phrase)
+    phrase = args.literal_phrase
     found = session.search(args, policy=policy, stage=stage, slot=slot, ref_prefix=ref_prefix, **details)
     observation = Observation(stage, query, phrase, found.corpus_count,
                               draft.catalog.present(found.hits, ref_prefix, phrase))
     draft.searches[stage] = observation
     return observation
+
+
+def slot_searches(draft: Draft, indices: list[int]) -> list[SearchCorpusArgs]:
+    """The searches search_slot would run for these slots now, in order: what a session can prefetch."""
+    return [search_args(draft, draft.slots[i].expression, draft.slots[i].key_phrase) for i in indices]
 
 
 def search_slot(session: RequestSession, draft: Draft, index: int, *, stage: str, ref_prefix: str) -> None:

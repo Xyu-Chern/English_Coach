@@ -1,6 +1,6 @@
 # AI English Speaking Phrase Agent — Design
 
-> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below. Owner decisions D1–D6 (verified examples first, the verified-slot lock, the request log, the admin page and a re-evaluation) are recorded under Learner clients.
+> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below. Owner decisions D1–D6 (verified examples first, the verified-slot lock, the request log, the admin page and a re-evaluation) are recorded under Learner clients, as is the latency work (parallel searches and a quick translation).
 
 ### Current minimal demo slice
 
@@ -196,6 +196,7 @@ The request is `{question, context}`. The default reply is one JSON object, `{ex
 
 | Line | When | Fields |
 |---|---|---|
+| `quick` | Optional, before any other line: the quick model call answered within 3 s | `text` (one English expression), `note` (short, in the learner's language). A generated suggestion with no source (see Faster first answer) |
 | `first` | The first stage verified 1–3 examples | `expressions` (verified only), `pending` (`false`: nothing follows), `note` |
 | `final` | After the continuation. The only line when nothing was verified or the request was declined | `expressions` (the whole answer, sent items first), `added` (indexes of later examples), `note` |
 | `error` | In place of `final` | `code`: `timeout`, `coach_unavailable` or a coach code |
@@ -205,11 +206,39 @@ The request is `{question, context}`. The default reply is one JSON object, `{ex
 - The JSON reply is the last answer the stream would show. If the continuation fails after verified examples were found, the reply returns them with 200 (before this change: 503).
 - Work stops 280 s after the request starts (Vercel's `maxDuration` is 300 s), with the error code `timeout`. One request runs per process. If the client leaves, the work stops at its next model call or search.
 
+#### Faster first answer: parallel searches and a quick translation
+
+Goal: the learner sees something useful within 2 s of asking, without weakening D1.
+
+- **Parallel searches:** the first stage's searches, one per candidate (`search_1` to `search_6`), run at the same time instead of one after another. The budget, the results and their order are unchanged; only the wait is shorter. `COACH_SEARCH_WORKERS` (1–9, default 6) sets how many run at once; `1` restores one after another. Each trace step records `started_ms` in its details: its start, in milliseconds from the start of its session, so overlapping steps can be drawn side by side.
+- **Quick translation:** right after the request arrives, the server starts one fast model call next to the candidate call. It asks for one natural English expression and a short note in the learner's language. If it answers within 3 s of the request, the stream sends it as the first line, `quick`; the target is under 2 s. If it fails, takes longer than 3 s or declines, nothing is sent and the stream goes on as before.
+- **Model:** `COACH_QUICK_MODEL` (default `LLM_MODEL`) and `COACH_QUICK_PROVIDER` (default `LLM_PROVIDER`).
+- **A generated suggestion, not a record:** the quick translation is model output with no podcast source and no verification. The app labels it as such, in Chinese and Korean, and keeps it apart from the verified examples.
+- **Relationship to D1:** the quick translation is not a slot. It does not count toward the three expressions, is never part of `first` or `final`, and cannot change what D1 sends. The verified examples that follow are separate and still never change; with all three verified, the continuation is still skipped.
+- **Old clients:** the JSON reply is unchanged and has no quick translation.
+- **Not evaluated:** D6 measured the answers without the quick translation.
+- **Measured latency (2026-11-22):** local server, Claude Haiku 5.5 (`claude-haiku-5-5`) for the coach and the quick call, 15 Korean questions from `evaluation/data/tasks.jsonl`, one request at a time, times seen by the client:
+
+  | Measure | p50 | p95 |
+  |---|---|---|
+  | `quick`, final shape (30 requests, all within 2 s) | 0.98 s | 1.41 s |
+  | `quick`, first shape (15 requests) | 1.20 s | 1.71 s |
+  | `first`, parallel searches (14 requests with a `first` line) | 16.1 s | 19.4 s |
+  | First stage, one search after another (`COACH_CONTINUATION=off`) | 20.0 s | 24.8 s |
+  | First stage, six searches at once | 16.3 s | 21.9 s |
+
+  - The 2 s target for `quick` is met.
+  - Tuning: the first shape asked Claude for a strict JSON schema with adaptive thinking at low effort. Once, thinking used up the 300-token cap and nothing was sent. The final shape sends no schema (the reply is still checked) and turns thinking off on Claude Haiku 5.5; other Claude models keep adaptive thinking at low effort, and other providers keep the schema.
+  - Parallel searches shortened the first stage by 4.4 s at the paired median (11 of 14 questions faster). `first` is still about 16 s: most of the wait is the two model calls (candidates and selection), not the searches.
+  - The declined question ended in 1.1 s, before its quick translation, so no `quick` line was sent.
+  - Measurement cost: about $0.21.
+
 #### Mode and request log (D5)
 
 - **Database:** `COACH_LOG_DATABASE_URL`, else `DATABASE_URL`, else `POSTGRES_URL`. Without one, the request log and the mode switch are off. At start the server creates its tables (`CREATE TABLE IF NOT EXISTS`); the same SQL is in `frontend/sql/request_log.sql`. Locally the `.env` `DATABASE_URL` (Docker Postgres) is used with no extra step. On Vercel the owner attaches Neon (steps in `frontend/README.md`).
 - **Mode:** `COACH_SYSTEM` is `agent` (the default, the locked agent) or `baseline`. The mode in effect is `coach_settings.coach_system` in the database, else `COACH_SYSTEM`, else `agent`. It is cached for 10 s, and a database error falls back to `COACH_SYSTEM`. Each switch is added to `coach_mode_changes`. `COACH_CONTINUATION` is `on` (the default) or `off` (first stage only, not evaluated) and is still read once at start. Any other value of either variable stops the start.
-- **Stdout line:** each request that passes the access checks still prints one JSON line: `event` (`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head` (the first 40 characters). Vercel keeps it 1 hour on Hobby, 1 day on Pro.
+- **Stdout line:** each request that passes the access checks still prints one JSON line: `event` (`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `quick_ms`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head` (the first 40 characters). Vercel keeps it 1 hour on Hobby, 1 day on Pro.
+- `quick_ms` is the time to the `quick` line, `null` when none was sent. The quick translation is a generated suggestion, so it does not count as the first answer.
 - **Saved row:** with a database the same request is also one `coach_request_log` row: mode and its source (`db` or `env`), transport, status, error code, the whole question, `quick_ms`, `first_ms`, `total_ms`, model calls, searches, tokens, verified counts, continuation, and `result` (the answer's expressions and trace, for the admin page). Time to the first answer is `first_ms`, or `total_ms` when it is `null`. Field meanings are in `frontend/README.md`.
 - **Public data (D2, D4):** the question is stored as written and `/admin` is open, so anyone with the address can read every saved question. Rows stay until the owner deletes them (judgment question R3).
 
@@ -263,6 +292,7 @@ In the submission run's 129 normal answers, the first stage verified all three s
 - The evaluation data's "mode the data was built for" is still set at packaging time; the mode in effect comes from `GET /admin/mode`.
 - The admin page's JavaScript has no automated test; server tests cover how it is served and its source rules.
 - The app's default agent is the locked agent that D6 measured: equal to the baseline on pass, not better as the pre-lock submission agent was (judgment question R1).
+- The quick translation adds one model call to each streamed request. Its latency and the gain from parallel searches were measured locally with Claude Haiku 5.5 only (Faster first answer); the deployed model is not measured. `first` still takes about 16 s.
 
 ## 11. Project Owner Judgment Questions
 
@@ -282,7 +312,7 @@ The five earlier scope questions are settled by the delivered clients: a questio
 
 # AI 英语口语表达 Agent — 设计文档
 
-> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。项目负责人决定 D1–D6（先发送已核对的例句、核对位置锁定、请求日志、管理页和重新评估）记录在「学习客户端」中。
+> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。项目负责人决定 D1–D6（先发送已核对的例句、核对位置锁定、请求日志、管理页和重新评估）记录在「学习客户端」中，缩短等待的工作（并行检索和快速翻译）也记录在那里。
 
 ### 当前最小 Demo 切片
 
@@ -478,6 +508,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 | 行 | 何时 | 字段 |
 |---|---|---|
+| `quick` | 可选，在所有其他行之前：快速模型调用在 3 秒内返回时 | `text`（一个英语表达）、`note`（简短说明，使用学习者的语言）。这是生成的建议，没有出处（见「更快看到第一个回答」） |
 | `first` | 第一阶段核对了 1–3 个例句 | `expressions`（只有核对通过的条目）、`pending`（`false` 表示后面没有内容）、`note` |
 | `final` | 后续阶段结束后。没有核对通过的例句或请求被拒绝时，只有这一行 | `expressions`（完整答案，已发送条目在前）、`added`（后来找到的例句序号）、`note` |
 | `error` | 代替 `final` | `code`：`timeout`、`coach_unavailable` 或教练错误码 |
@@ -487,11 +518,39 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - JSON 回复就是流最终会显示的答案。已找到核对通过的例句后，即使后续阶段失败，回复也会以 200 返回这些例句（此前为 503）。
 - 请求开始 280 秒后停止工作（Vercel 的 `maxDuration` 为 300 秒），错误码为 `timeout`。每个进程同时只处理一个请求。客户端离开后，工作会在下一次模型调用或检索前停止。
 
+#### 更快看到第一个回答：并行检索与快速翻译
+
+目标：学习者提问后 2 秒内就能看到有用的内容，同时不削弱 D1。
+
+- **并行检索：** 第一阶段为每个候选各做一次检索（`search_1` 至 `search_6`），现在同时进行，不再一个接一个。预算、结果及其顺序都不变，只是等待更短。`COACH_SEARCH_WORKERS`（1–9，默认 6）决定同时进行几个；`1` 恢复逐个进行。每个 trace 步骤在 details 中记录 `started_ms`：该步骤的开始时间，以所属会话开始后的毫秒数表示，因此重叠的步骤可以并排显示。
+- **快速翻译：** 请求一到，服务端就在候选调用旁边同时发起一次快速模型调用，请它给出一个自然的英语表达和一句用学习者语言写的简短说明。如果在请求开始后 3 秒内返回，流就把它作为第一行 `quick` 发送；目标是 2 秒以内。调用失败、超过 3 秒或拒绝回答时，什么都不发送，流照常继续。
+- **模型：** `COACH_QUICK_MODEL`（默认 `LLM_MODEL`）和 `COACH_QUICK_PROVIDER`（默认 `LLM_PROVIDER`）。
+- **生成的建议，而不是记录：** 快速翻译是模型输出，没有播客出处，也没有经过核对。应用用中文和韩文标明这一点，并把它与核对通过的例句分开显示。
+- **与 D1 的关系：** 快速翻译不是位置（slot）。它不计入三个表达，不属于 `first` 或 `final`，也不能改变 D1 发送的内容。随后到来的核对通过的例句与它无关，仍然不会改变；三个都核对通过时，仍然跳过后续阶段。
+- **旧客户端：** JSON 回复不变，不含快速翻译。
+- **未经评估：** D6 评估的回答不含快速翻译。
+- **实测延迟（2026-11-22）：** 本地服务，教练和快速调用都用 Claude Haiku 5.5（`claude-haiku-5-5`），取 `evaluation/data/tasks.jsonl` 中的 15 个韩语问题，一次一个请求，时间为客户端看到的时间：
+
+  | 指标 | p50 | p95 |
+  |---|---|---|
+  | `quick`，最终形式（30 个请求，全部在 2 秒内） | 0.98 秒 | 1.41 秒 |
+  | `quick`，最初形式（15 个请求） | 1.20 秒 | 1.71 秒 |
+  | `first`，并行检索（14 个有 `first` 行的请求） | 16.1 秒 | 19.4 秒 |
+  | 第一阶段，逐个检索（`COACH_CONTINUATION=off`） | 20.0 秒 | 24.8 秒 |
+  | 第一阶段，六个检索同时进行 | 16.3 秒 | 21.9 秒 |
+
+  - `quick` 的 2 秒目标已达到。
+  - 调整：最初形式要求 Claude 按严格 JSON schema 回答，并使用低 effort 的自适应思考。有一次思考用完了 300 token 上限，结果什么也没发送。最终形式不发送 schema（回复仍会校验），并在 Claude Haiku 5.5 上关闭思考；其他 Claude 模型仍用低 effort 的自适应思考，其他服务商仍用 schema。
+  - 并行检索使第一阶段按配对中位数缩短 4.4 秒（14 个问题中 11 个更快）。`first` 仍约 16 秒：大部分等待来自两次模型调用（候选和选择），而不是检索。
+  - 被拒绝的问题在 1.1 秒结束，早于它的快速翻译，所以没有发送 `quick` 行。
+  - 测量费用：约 0.21 美元。
+
 #### 模式与请求日志（D5）
 
 - **数据库：** 依次使用 `COACH_LOG_DATABASE_URL`、`DATABASE_URL`、`POSTGRES_URL`。都没有时，请求日志和模式切换关闭。服务启动时创建所需的表（`CREATE TABLE IF NOT EXISTS`），相同的 SQL 也放在 `frontend/sql/request_log.sql`。本地自动使用 `.env` 中的 `DATABASE_URL`（Docker Postgres），无需额外步骤。在 Vercel 上由项目负责人接入 Neon（步骤见 `frontend/README.md`）。
 - **模式：** `COACH_SYSTEM` 为 `agent`（默认，加锁的 agent）或 `baseline`。实际生效的模式依次取数据库中的 `coach_settings.coach_system`、`COACH_SYSTEM`、`agent`。结果缓存 10 秒，数据库出错时退回 `COACH_SYSTEM`。每次切换都记入 `coach_mode_changes`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`（只运行第一阶段，未经评估），仍只在启动时读取一次。两个变量出现其他值时都会拒绝启动。
-- **stdout 日志行：** 每个通过访问检查的请求仍打印一行 JSON：`event`（`coach_request`）、`ts`、`request_id`、`mode`、`continuation_setting`、`transport`、`status`、`error_code`、`verified_first`、`added_final`、`verified_final`、`continuation`、`invariant_ok`、`first_ms`、`total_ms`、`llm_calls`、`searches`、`input_tokens`、`output_tokens`、`cached_input_tokens`、`disconnected`、`question_head`（前 40 个字符）。Vercel 保留这些日志的时间为 Hobby 1 小时、Pro 1 天。
+- **stdout 日志行：** 每个通过访问检查的请求仍打印一行 JSON：`event`（`coach_request`）、`ts`、`request_id`、`mode`、`continuation_setting`、`transport`、`status`、`error_code`、`verified_first`、`added_final`、`verified_final`、`continuation`、`invariant_ok`、`quick_ms`、`first_ms`、`total_ms`、`llm_calls`、`searches`、`input_tokens`、`output_tokens`、`cached_input_tokens`、`disconnected`、`question_head`（前 40 个字符）。Vercel 保留这些日志的时间为 Hobby 1 小时、Pro 1 天。
+- `quick_ms` 是到 `quick` 行的时间，没有发送时为 `null`。快速翻译是生成的建议，所以不算作首次看到的答案。
 - **保存的行：** 有数据库时，同一请求还会保存为 `coach_request_log` 中的一行：模式及其来源（`db` 或 `env`）、传输方式、状态、错误码、完整问题、`quick_ms`、`first_ms`、`total_ms`、模型调用数、检索数、token、核对数、后续阶段，以及 `result`（供管理页使用的答案表达和 trace）。首次看到答案的时间是 `first_ms`，为 `null` 时是 `total_ms`。字段含义见 `frontend/README.md`。
 - **公开数据（D2、D4）：** 问题原样保存，`/admin` 不设保护，因此知道网址的人都能读到所有已保存的问题。这些行会一直保留，直到项目负责人删除（判断题 R3）。
 
@@ -545,6 +604,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - 评估数据中的“数据对应的模式”仍在打包时确定；当前生效的模式来自 `GET /admin/mode`。
 - 管理页的 JavaScript 没有自动化测试；服务端测试覆盖页面的提供方式和源码规则。
 - 应用默认的 agent 是 D6 评估过的加锁 agent：通过率与 baseline 相同，不像加锁前的提交 agent 那样更好（判断题 R1）。
+- 快速翻译使每个流式请求多一次模型调用。它的延迟和并行检索带来的改善只在本地用 Claude Haiku 5.5 测量过（更快看到第一个回答）；部署所用的模型没有测量。`first` 仍需约 16 秒。
 
 ## 11. 项目负责人判断题
 
@@ -564,7 +624,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 # AI 영어 말하기 표현 Agent — 설계 문서
 
-> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다. 책임자 결정 D1–D6(검증된 예문 먼저 보내기, 검증 슬롯 잠금, 요청 로그, 어드민 화면, 재평가)은 학습 클라이언트 절에 기록합니다.
+> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다. 책임자 결정 D1–D6(검증된 예문 먼저 보내기, 검증 슬롯 잠금, 요청 로그, 어드민 화면, 재평가)과 대기 시간 단축 작업(병렬 검색, 빠른 번역)은 학습 클라이언트 절에 기록합니다.
 
 ### 현재 최소 Demo 슬라이스
 
@@ -760,6 +820,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 | 줄 | 언제 | 필드 |
 |---|---|---|
+| `quick` | 선택 사항이며 다른 모든 줄보다 먼저: 빠른 모델 호출이 3초 안에 답한 경우 | `text`(영어 표현 하나), `note`(학습자 언어로 쓴 짧은 설명). 출처가 없는 생성된 제안이다(첫 답 더 빨리 보기 참고) |
 | `first` | 첫 단계에서 예문 1~3개가 검증됨 | `expressions`(검증된 항목만), `pending`(`false`면 뒤에 오는 것이 없음), `note` |
 | `final` | 후속 단계가 끝난 뒤. 검증된 예문이 없거나 요청이 거절되면 이 줄만 온다 | `expressions`(전체 답, 보낸 항목이 앞), `added`(나중에 찾은 예문의 번호), `note` |
 | `error` | `final` 대신 | `code`: `timeout`, `coach_unavailable` 또는 코치 오류 코드 |
@@ -769,11 +830,39 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - JSON 응답은 스트림이 마지막에 보여 줄 답과 같다. 검증된 예문을 찾은 뒤 후속 단계가 실패하면 그 예문을 200으로 돌려준다(이번 변경 전에는 503).
 - 작업은 요청 시작 280초 뒤에 오류 코드 `timeout`으로 멈춘다(Vercel의 `maxDuration`은 300초). 프로세스당 요청 하나만 처리한다. 클라이언트가 떠나면 작업은 다음 모델 호출이나 검색 전에 멈춘다.
 
+#### 첫 답 더 빨리 보기: 병렬 검색과 빠른 번역
+
+목표: D1을 약하게 만들지 않으면서, 학습자가 질문한 뒤 2초 안에 쓸 만한 것을 본다.
+
+- **병렬 검색:** 첫 단계는 후보마다 검색을 한 번씩 한다(`search_1`~`search_6`). 이 검색들을 이제 하나씩 차례로가 아니라 동시에 실행한다. 예산, 결과, 결과 순서는 그대로이고 기다리는 시간만 줄어든다. `COACH_SEARCH_WORKERS`(1–9, 기본값 6)로 동시에 실행할 수를 정하고, `1`이면 예전처럼 하나씩 실행한다. trace 단계마다 details에 `started_ms`를 기록한다. 그 단계가 시작된 시각을 해당 세션 시작부터의 밀리초로 적은 값이라, 겹치는 단계를 나란히 그릴 수 있다.
+- **빠른 번역:** 요청이 오면 서버는 곧바로 후보 호출과 동시에 빠른 모델 호출을 하나 시작한다. 자연스러운 영어 표현 하나와 학습자 언어로 쓴 짧은 설명을 요청한다. 요청 시작 후 3초 안에 답하면 스트림이 그것을 첫 줄 `quick`으로 보낸다. 목표는 2초 이내다. 호출이 실패하거나 3초를 넘기거나 답을 거절하면 아무것도 보내지 않고 스트림은 예전대로 이어진다.
+- **모델:** `COACH_QUICK_MODEL`(기본값 `LLM_MODEL`)과 `COACH_QUICK_PROVIDER`(기본값 `LLM_PROVIDER`).
+- **기록이 아니라 생성된 제안:** 빠른 번역은 팟캐스트 출처도 검증도 없는 모델 출력이다. 앱은 이를 중국어와 한국어로 분명히 표시하고, 검증된 예문과 떨어뜨려 보여 준다.
+- **D1과의 관계:** 빠른 번역은 슬롯이 아니다. 세 표현에 들어가지 않고, `first`나 `final`에 포함되지 않으며, D1이 보내는 내용을 바꿀 수 없다. 뒤이어 오는 검증된 예문은 이것과 별개이며 여전히 바뀌지 않는다. 세 개가 모두 검증되면 여전히 후속 단계를 생략한다.
+- **이전 클라이언트:** JSON 응답은 그대로이며 빠른 번역이 없다.
+- **평가 밖:** D6은 빠른 번역 없이 답을 측정했다.
+- **측정한 대기 시간(2026-11-22):** 로컬 서버, 코치와 빠른 호출 모두 Claude Haiku 5.5(`claude-haiku-5-5`), `evaluation/data/tasks.jsonl`의 한국어 질문 15개, 한 번에 요청 하나, 클라이언트가 본 시간:
+
+  | 항목 | p50 | p95 |
+  |---|---|---|
+  | `quick`, 최종 방식(요청 30개, 모두 2초 이내) | 0.98초 | 1.41초 |
+  | `quick`, 처음 방식(요청 15개) | 1.20초 | 1.71초 |
+  | `first`, 병렬 검색(`first` 줄이 온 요청 14개) | 16.1초 | 19.4초 |
+  | 첫 단계, 검색을 하나씩(`COACH_CONTINUATION=off`) | 20.0초 | 24.8초 |
+  | 첫 단계, 검색 여섯 개를 동시에 | 16.3초 | 21.9초 |
+
+  - `quick`의 2초 목표를 달성했다.
+  - 조정: 처음 방식은 Claude에 엄격한 JSON 스키마와 낮은 effort의 적응형 사고를 썼다. 한 번은 사고가 300토큰 한도를 다 써서 아무것도 보내지 못했다. 최종 방식은 스키마를 보내지 않고(답은 그대로 검사한다) Claude Haiku 5.5에서는 사고를 끈다. 다른 Claude 모델은 낮은 effort의 적응형 사고를 유지하고, 다른 제공자는 스키마를 유지한다.
+  - 병렬 검색으로 첫 단계가 짝지은 중앙값 기준 4.4초 줄었다(14개 질문 중 11개가 더 빠름). `first`는 여전히 약 16초다. 대기의 대부분은 검색이 아니라 두 번의 모델 호출(후보, 선택)이다.
+  - 거절된 질문은 1.1초 만에 끝나 빠른 번역보다 먼저 끝났으므로 `quick` 줄을 보내지 않았다.
+  - 측정 비용: 약 $0.21.
+
 #### 모드와 요청 로그(D5)
 
 - **데이터베이스:** `COACH_LOG_DATABASE_URL`, 없으면 `DATABASE_URL`, 없으면 `POSTGRES_URL`을 쓴다. 셋 다 없으면 요청 로그와 모드 전환이 꺼진다. 서버는 시작할 때 테이블을 만든다(`CREATE TABLE IF NOT EXISTS`). 같은 SQL이 `frontend/sql/request_log.sql`에도 있다. 로컬에서는 `.env`의 `DATABASE_URL`(Docker Postgres)을 추가 작업 없이 쓴다. Vercel에서는 책임자가 Neon을 연결한다(절차는 `frontend/README.md`).
 - **모드:** `COACH_SYSTEM`은 `agent`(기본값, 잠금 agent) 또는 `baseline`이다. 실제 모드는 데이터베이스의 `coach_settings.coach_system`, 없으면 `COACH_SYSTEM`, 없으면 `agent`다. 10초 동안 캐시하며, 데이터베이스 오류 때는 `COACH_SYSTEM`으로 돌아간다. 전환할 때마다 `coach_mode_changes`에 한 행이 추가된다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`(첫 단계만 실행, 평가되지 않음)이며 지금처럼 시작할 때 한 번 읽는다. 두 변수 모두 다른 값이면 시작하지 않는다.
-- **stdout 로그 줄:** 접근 검사를 통과한 요청마다 지금처럼 JSON 한 줄을 출력한다: `event`(`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`(앞 40자). Vercel은 이 로그를 Hobby 1시간, Pro 1일 보관한다.
+- **stdout 로그 줄:** 접근 검사를 통과한 요청마다 지금처럼 JSON 한 줄을 출력한다: `event`(`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `quick_ms`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`(앞 40자). Vercel은 이 로그를 Hobby 1시간, Pro 1일 보관한다.
+- `quick_ms`는 `quick` 줄까지의 시간이며, 보내지 않았으면 `null`이다. 빠른 번역은 생성된 제안이므로 첫 답으로 치지 않는다.
 - **저장되는 행:** 데이터베이스가 있으면 같은 요청이 `coach_request_log`의 한 행으로도 남는다: 모드와 그 출처(`db` 또는 `env`), 전송 방식, 상태, 오류 코드, 질문 전체, `quick_ms`, `first_ms`, `total_ms`, 모델 호출 수, 검색 수, 토큰, 검증 개수, 후속 단계, `result`(어드민 화면이 쓰는 답의 표현과 trace). 첫 답을 보는 시간은 `first_ms`이고, `null`이면 `total_ms`다. 필드의 뜻은 `frontend/README.md`에 있다.
 - **공개 데이터(D2, D4):** 질문은 원문 그대로 저장되고 `/admin`은 보호가 없으므로, 주소를 아는 사람은 누구나 저장된 질문을 모두 읽을 수 있다. 행은 책임자가 지울 때까지 남는다(판단 질문 R3).
 
@@ -827,6 +916,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - 평가 데이터의 "데이터를 만든 모드"는 여전히 패키징 때 정해진다. 지금 적용 중인 모드는 `GET /admin/mode`에서 온다.
 - 어드민 화면의 JavaScript에는 자동 테스트가 없다. 서버 테스트는 화면을 제공하는 방식과 소스 규칙을 확인한다.
 - 앱의 기본 agent는 D6에서 측정한 잠금 agent다. 통과율은 baseline과 같고, 잠금 전 제출 agent처럼 더 낫지는 않다(판단 질문 R1).
+- 빠른 번역은 스트리밍 요청마다 모델 호출을 하나 더한다. 그 대기 시간과 병렬 검색으로 줄어든 시간은 로컬에서 Claude Haiku 5.5로만 측정했다(첫 답 더 빨리 보기). 배포 모델은 측정하지 않았다. `first`는 여전히 약 16초 걸린다.
 
 ## 11. 프로젝트 책임자 판단 질문
 

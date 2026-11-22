@@ -7,6 +7,7 @@ import re
 
 import numpy as np
 from evaluation.snapshot_search import SnapshotSearch
+from frontend.server import search_workers
 from frontend.staged import StagedCoach
 from translation_agent_demo.agents import CoachDependencies
 from translation_agent_demo.agents.contracts import CorpusSearchHit
@@ -15,6 +16,7 @@ from translation_agent_demo.providers import chat_model
 from translation_agent_demo.providers.local_embeddings import local_client
 
 DATA = Path(__file__).resolve().parents[2] / "corpus"
+WORKERS = search_workers()  # COACH_SEARCH_WORKERS, read when the function starts; a wrong value stops it
 
 
 class PublishedCorpus:
@@ -82,6 +84,6 @@ def stream(question, mode, guard):
     """The staged coach (frontend/staged.py) over the bundled snapshot, in the app's mode (COACH_SYSTEM,
     COACH_CONTINUATION, read once by make_app)."""
     model, encoder, corpus = dependencies()
-    return StagedCoach(
-        CoachDependencies(model, SnapshotSearch(corpus, encoder)), mode
+    return StagedCoach(  # the snapshot and the encoder are read-only: the six first-stage searches run at once
+        CoachDependencies(model, SnapshotSearch(corpus, encoder), search_workers=WORKERS), mode
     ).stream(question, guard)

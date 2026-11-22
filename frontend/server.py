@@ -4,6 +4,11 @@ POST /api/search {question, context} answers one request:
 
     any other Accept                   one JSON reply, as before: {"expressions": [...], "note": ...}
     Accept: application/x-ndjson       one JSON object per line (opt-in), in this order:
+      {"type":"quick","text":"<one English expression>","note":"<short note, learner's language>"}
+                                       optional, only ever the first line: a generated suggestion from one
+                                       fast model call started with the coach (frontend/quick.py), sent when
+                                       it answers within 3 s and before any other line; never on failure,
+                                       refusal or lateness. Not a verified record; first/final do not change.
       {"type":"first","expressions":[verified only],"pending":true|false,"note":null}
                                        the first stage's verified examples; pending=false ends the stream
       {"type":"final","expressions":[...],"added":[indexes],"note":...}
@@ -70,6 +75,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from frontend.quick import QUICK_SECONDS, Quick, environment_quick
 from frontend.request_log import MAX_LIMIT, MODE_CACHE_SECONDS, MODES, ModeSwitch, RequestStore, StoreError
 from frontend.staged import CoachMode, Failed, Final, First, Guard, StagedCoach, is_terminal
 from translation_agent_demo.agents import CoachDependencies, SessionLimits
@@ -90,6 +96,7 @@ MAX_DEADLINE_SECONDS = 3600.0  # the most the local server's --deadline / COACH_
 NOINDEX = {"X-Robots-Tag": "noindex"}  # /admin is open to anyone with the address (D4), not to search engines
 POLL_SECONDS = 0.05  # how often a stream checks for the coach's next event
 QUESTION_HEAD_CHARS = 40  # how much of the request the log line keeps (D2, D5)
+SEARCH_WORKERS = 6  # the first stage's six searches at once (COACH_SEARCH_WORKERS=1: one after another)
 _DONE = object()  # the coach's thread has ended
 
 
@@ -109,6 +116,12 @@ class LearnerExpression(BaseModel):
 class Reply(BaseModel):
     expressions: list[LearnerExpression]
     note: str | None = None
+
+
+class QuickEvent(BaseModel):
+    type: Literal["quick"] = "quick"
+    text: str
+    note: str
 
 
 class FirstEvent(BaseModel):
@@ -142,12 +155,54 @@ def dependencies():
     return chat_model(Settings.from_environment()), embedding_client(), PostgresSettings.from_environment()
 
 
-def local_stream(question, mode, guard):
-    """The local deployment: the PostgreSQL transcript index, one connection per request."""
+def search_workers(environ=os.environ) -> int:
+    """COACH_SEARCH_WORKERS: how many of a step's independent searches run at once, 1 (one after another) to 9.
+    Default SEARCH_WORKERS: the first stage's six together. A value outside 1-9 stops the start."""
+    value = environ.get("COACH_SEARCH_WORKERS", "").strip() or str(SEARCH_WORKERS)
+    if not value.isdigit() or not 1 <= int(value) <= 9:
+        raise ValueError(f"COACH_SEARCH_WORKERS must be 1 to 9, not {value!r}.")
+    return int(value)
+
+
+class _Connections:
+    """One request's PostgreSQL connections. A connection runs one query at a time, so searches running at
+    once each take an idle one or open another. The first opens at once (no database: no model call).
+    close() closes the idle ones; one still in use (a prefetched search) closes when its search returns."""
+
+    def __init__(self, db, encoder):
+        self.db, self.encoder, self._lock, self._closed = db, encoder, threading.Lock(), False
+        self._idle = [connect_database(db)]
+
+    def search(self, args):
+        with self._lock:
+            conn = self._idle.pop() if self._idle else None
+        conn = conn or connect_database(self.db)
+        try:
+            return search_corpus(args, conn=conn, embeddings=self.encoder)
+        finally:
+            with self._lock:
+                keep = not self._closed
+                if keep:
+                    self._idle.append(conn)
+            if not keep:
+                conn.close()
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed, idle, self._idle = True, self._idle, []
+        for conn in idle:
+            conn.close()
+
+
+def local_stream(question, mode, guard, workers: int = SEARCH_WORKERS):
+    """The local deployment: the PostgreSQL transcript index, `workers` searches at once."""
     model, encoder, db = dependencies()
-    with connect_database(db) as conn:
-        coach = StagedCoach(CoachDependencies(model, partial(search_corpus, conn=conn, embeddings=encoder)), mode)
+    connections = _Connections(db, encoder)
+    try:
+        coach = StagedCoach(CoachDependencies(model, connections.search, search_workers=workers), mode)
         yield from coach.stream(question, guard)
+    finally:
+        connections.close()
 
 
 def answering(answer):
@@ -186,7 +241,7 @@ def log_record(mode: CoachMode, transport: str, question: str, mode_source: str 
             "continuation_setting": mode.continuation_setting,
             "transport": transport, "status": None, "error_code": None, "verified_first": None,
             "added_final": None, "verified_final": None, "continuation": None, "invariant_ok": None,
-            "first_ms": None, "total_ms": 0,
+            "quick_ms": None, "first_ms": None, "total_ms": 0,
             "llm_calls": 0, "searches": 0, "input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0,
             "disconnected": False, "question_head": question[:QUESTION_HEAD_CHARS]}
 
@@ -197,10 +252,11 @@ class Exchange:
     The log fields that compare with the admin data (frontend/admin_data.py) share its definitions:
     added_final counts examples verified after a first answer (0 when there was none), verified_final
     the verified examples the learner ends with. first_ms is when the client received the first answer,
-    so only the stream has it: a JSON client sees nothing before total_ms."""
+    so only the stream has it: a JSON client sees nothing before total_ms. quick_ms is when the stream
+    sent its quick line (None without one); only a stream asks for it."""
 
     def __init__(self, stream, question: str, mode: CoachMode, record: dict, *, clock, deadline_seconds: float,
-                 release, log, save=None):
+                 release, log, quick=None, quick_seconds: float = QUICK_SECONDS, save=None):
         self.clock, self.record, self.log, self._release = clock, record, log, release
         self.save = save  # save(record, result): the database row, written by persist() after the response
         self.streaming = record["transport"] == "ndjson"
@@ -210,9 +266,23 @@ class Exchange:
         self.events: queue.Queue = queue.Queue()
         self.first: First | None = None  # the first answer, once given
         self.result = None  # the terminal event's RunResult, when there was one
+        self.sent = False  # the stream has written a coach line: a quick line comes too late
         self._lock = threading.Lock()
         self._released = self._closed = self._persisted = False
+        if quick is not None and self.streaming:  # started with the coach; a JSON reply never shows it
+            threading.Thread(target=self._quick, args=(quick, question, quick_seconds), name="coach-quick",
+                             daemon=True).start()
         threading.Thread(target=self._work, args=(stream, question, mode), name="coach-request", daemon=True).start()
+
+    # ------------------------------------------------------- the quick answer's thread
+    def _quick(self, quick, question: str, seconds: float) -> None:
+        """One quick answer, queued only when it came within `seconds` of the start and the request is on."""
+        try:
+            answer = None if self.guard.stopped else quick(question)
+        except Exception:
+            answer = None
+        if isinstance(answer, Quick) and not self.guard.stopped and self.clock() - self.started <= seconds:
+            self.events.put(answer)
 
     # ------------------------------------------------------- the coach's thread
     def _work(self, stream, question: str, mode: CoachMode) -> None:
@@ -245,8 +315,14 @@ class Exchange:
     def elapsed_ms(self) -> int:
         return round((self.clock() - self.started) * 1000)
 
-    def wire(self, event) -> BaseModel:
-        """The line for one coach event (or _DONE); records it for the log."""
+    def wire(self, event) -> BaseModel | None:
+        """The line for one coach event (or _DONE, or the quick answer); records it for the log. None: a quick
+        answer that would no longer be the first line, which is not sent."""
+        if isinstance(event, Quick):
+            if self.sent or not self.streaming:
+                return None
+            self.record["quick_ms"] = self.elapsed_ms()
+            return QuickEvent(text=event.text, note=event.note)
         if event is _DONE:
             return self.fail("coach_unavailable")
         if getattr(event, "result", None) is not None:
@@ -289,6 +365,8 @@ class Exchange:
                 except queue.Empty:
                     line = self.fail("timeout")
                     break
+                if isinstance(event, Quick):  # never asked for here; the JSON reply is unchanged
+                    continue
                 line = self.wire(event)
                 if event is _DONE or is_terminal(event):
                     break
@@ -313,7 +391,12 @@ class Exchange:
                         continue
                     line, finished = self.fail("timeout"), True
                 else:
-                    line, finished = self.wire(event), event is _DONE or is_terminal(event)
+                    line = self.wire(event)
+                    if line is None:
+                        continue
+                    finished = not isinstance(event, Quick) and (event is _DONE or is_terminal(event))
+                if not isinstance(line, QuickEvent):
+                    self.sent = True
                 yield line.model_dump_json() + "\n"
         finally:
             self.close(left=not finished)
@@ -498,19 +581,27 @@ def cross_site(request: Request, origin: str) -> bool:
 
 
 # ------------------------------------------------------------------ the app
-def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_ui=True, public_access=False,
-             deadline_seconds: float = DEADLINE_SECONDS, log=None, clock=time.monotonic,
-             store: RequestStore | None = None, mode_cache_seconds: float = MODE_CACHE_SECONDS):
+def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = None, serve_ui=True,
+             public_access=False, deadline_seconds: float = DEADLINE_SECONDS, quick_seconds: float = QUICK_SECONDS,
+             log=None, clock=time.monotonic, store: RequestStore | None = None,
+             mode_cache_seconds: float = MODE_CACHE_SECONDS):
     """stream(question, mode, guard) -> events answers requests (the staged coach); answer(question) ->
     RunResult does instead, as one final answer; with neither, the local PostgreSQL index does.
 
-    mode defaults to COACH_SYSTEM / COACH_CONTINUATION, read now: an unknown value stops the start. With
+    quick(question) -> Quick | None gives NDJSON streams their quick line (frontend/quick.py). With neither
+    stream nor answer it defaults to the environment's quick model (environment_quick); an injected stream
+    or answer has none unless quick is given too.
+
+    mode defaults to COACH_SYSTEM / COACH_CONTINUATION, read now: an unknown value stops the start, as does
+    a COACH_SEARCH_WORKERS outside 1-9 for the local index (search_workers). With
     serve_ui, so are COACH_ADMIN_DIR / COACH_ADMIN_DATA (admin_folders). store: the request log and mode
     switch (RequestStore.from_environment() in both deployments); without one nothing is written and every
     request runs in mode.system. Its tables are ensured now; a database that is down stops nothing."""
     mode = mode or CoachMode.from_environment()
     admin = admin_folders() if serve_ui else None
-    stream = stream or (answering(answer) if answer is not None else local_stream)
+    if quick is None and stream is None and answer is None:
+        quick = environment_quick
+    stream = stream or (answering(answer) if answer is not None else partial(local_stream, workers=search_workers()))
     log = log or _print
     store = store or RequestStore(None)
     if store.enabled:
@@ -559,7 +650,7 @@ def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_u
             return refused(429, "coach_busy", "busy")
         try:
             exchange = Exchange(stream, q, request_mode, record, clock=clock, deadline_seconds=deadline_seconds,
-                                release=slot.release, log=log, save=save)
+                                release=slot.release, log=log, quick=quick, quick_seconds=quick_seconds, save=save)
         except Exception:
             slot.release()
             return refused(503, "coach_unavailable", "error")

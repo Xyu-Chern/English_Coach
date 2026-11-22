@@ -935,6 +935,19 @@ nav .dot {width:8px;height:8px;border-radius:50%;background:var(--purple);box-sh
 .chip-new {padding:1px 10px;border-radius:20px;background:var(--accent);color:var(--ink);font-weight:700}
 .pod-group .answer-card {max-width:none;margin-top:14px;padding:16px 0 4px;border:0;border-top:1px solid var(--line);border-radius:0}
 .more-head {display:flex;align-items:center;gap:8px;max-width:830px;margin:30px 0 0;font-size:1.1rem;color:var(--purple)}
+/* The quick translation (PR5): generated before the podcast check, so it never looks like a verified card. */
+.quick {align-self:flex-start;width:fit-content;max-width:min(600px,94%);padding:10px 16px 12px;border:1.5px dashed #b4acdc;border-radius:4px 20px 20px 20px;background:#f4f2fc;color:var(--ink);overflow-wrap:anywhere}
+.quick p {margin:0}
+.quick-label {display:flex;align-items:center;gap:7px;font-size:.8rem;font-weight:700;color:var(--purple);word-break:keep-all}
+.quick-label:before {content:"";flex:none;width:7px;height:7px;border-radius:50%;background:#8b80d4}
+.quick .quick-text {margin-top:4px;font-size:1.15rem;font-weight:650;line-height:1.4}
+.quick .quick-note {margin-top:4px;font-size:.9rem;color:var(--muted)}
+.quick.done {margin:0 0 8px;padding:6px 12px 8px;border-color:#dcd8ea;background:transparent}
+.quick.done .quick-label {color:var(--muted);font-weight:600}
+.quick.done .quick-label:before {background:#c3bedb}
+.quick.done .quick-text {font-size:.95rem;font-weight:500;color:#4d4d60}
+.quick.done .quick-note {font-size:.85rem}
+main > .quick {margin:18px 0 0}
 @media (max-width: 650px) {
   .chat-home {padding-bottom:var(--nav-h,62px)}
   .with-turns .chat-form {bottom:calc(var(--nav-h,62px) + 8px)}

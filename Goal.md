@@ -208,6 +208,17 @@ Contracts and known gaps are in `design.md` (Mode and request log, Admin API). T
 
 The S0–S9 board above still shows the original plan. It was not updated after the course submission.
 
+### Faster first answer: parallel searches and a quick translation
+
+Scope and contracts are in `design.md` (Learner clients → Faster first answer). The aim is something useful within 2 s, without changing D1.
+
+| ID | Sub-goal | Depends on | Status | Latest check |
+|---|---|---|---|---|
+| L1 | Server: parallel first-stage searches, the `quick` line (3 s limit, `COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`), `quick_ms` in the log line, `started_ms` in trace steps | G2 | Done | 2026-11-22: coach 113, evaluation 126 (5 skipped), frontend 71 tests pass |
+| L2 | Learner app: show the `quick` line in Chinese and Korean, marked as a generated suggestion | L1 | In progress | Pending: headless browser check |
+| L3 | Three-language documentation | L1 | Done | `design.md`, `frontend/README.md`, this file |
+| L4 | Measure time to `quick` and to `first`, before and after | L1, L2 | Done | 2026-11-22, Claude Haiku 5.5, local: `quick` p50 0.98 s / p95 1.41 s (2 s target met); `first` p50 16.1 s; first stage 20.0 → 16.3 s at p50 with parallel searches |
+
 ## Project Owner Judgment Questions
 
 1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that WSL can package the same `/admin`? The detail and the recommendation are in `frontend/README.md`, judgment question 2.
@@ -431,6 +442,17 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 上方的 S0–S9 看板仍是原始计划，课程提交后没有更新。
 
+### 更快看到第一个回答：并行检索与快速翻译
+
+范围和合约见 `design.md`（学习客户端 → 更快看到第一个回答）。目标是在不改变 D1 的前提下，2 秒内显示有用的内容。
+
+| 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
+|---|---|---|---|---|
+| L1 | 服务端：第一阶段并行检索，`quick` 行（3 秒上限，`COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`），日志行中的 `quick_ms`，trace 步骤中的 `started_ms` | G2 | 完成 | 2026-11-22：教练 113、评估 126（跳过 5）、前端 71 个测试通过 |
+| L2 | 学习端：用中文和韩文显示 `quick` 行，并标明是生成的建议 | L1 | 进行中 | 待完成：无头浏览器检查 |
+| L3 | 三语文档 | L1 | 完成 | `design.md`、`frontend/README.md` 和本文件 |
+| L4 | 测量改动前后到 `quick` 和到 `first` 的时间 | L1、L2 | 完成 | 2026-11-22，Claude Haiku 5.5，本地：`quick` p50 0.98 秒 / p95 1.41 秒（达到 2 秒目标）；`first` p50 16.1 秒；并行检索使第一阶段 p50 从 20.0 秒降到 16.3 秒 |
+
 ## 项目负责人判断题
 
 1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让 WSL 能打包出相同的 `/admin`？详情和建议见 `frontend/README.md` 判断题 2。
@@ -653,6 +675,17 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | G13 | 책임자가 Neon(무료 플랜)을 Vercel 프로젝트에 연결 | — | 시작 전 | 책임자만 가능: Hobby 플랜은 멤버를 초대할 수 없음 |
 
 위 S0–S9 현황판은 원래 계획 그대로다. 수업 제출 뒤에는 갱신하지 않았다.
+
+### 첫 답 더 빨리 보기: 병렬 검색과 빠른 번역
+
+범위와 계약은 `design.md`(학습 클라이언트 → 첫 답 더 빨리 보기)에 있다. D1을 바꾸지 않고 2초 안에 쓸 만한 것을 보여 주는 것이 목표다.
+
+| ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
+|---|---|---|---|---|
+| L1 | 서버: 첫 단계 병렬 검색, `quick` 줄(3초 제한, `COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`), 로그 줄의 `quick_ms`, trace 단계의 `started_ms` | G2 | 완료 | 2026-11-22: 코치 113, 평가 126(건너뜀 5), 프런트엔드 71개 테스트 통과 |
+| L2 | 학습자 앱: `quick` 줄을 중국어와 한국어로 보여 주고 생성된 제안이라고 표시 | L1 | 진행 중 | 대기: 헤드리스 브라우저 확인 |
+| L3 | 3개 언어 문서 | L1 | 완료 | `design.md`, `frontend/README.md`, 이 파일 |
+| L4 | 변경 전후로 `quick`과 `first`까지의 시간 측정 | L1, L2 | 완료 | 2026-11-22, Claude Haiku 5.5, 로컬: `quick` p50 0.98초 / p95 1.41초(2초 목표 달성); `first` p50 16.1초; 병렬 검색으로 첫 단계 p50 20.0 → 16.3초 |
 
 ## 프로젝트 책임자 판단 질문
 

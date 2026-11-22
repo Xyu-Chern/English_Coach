@@ -5,7 +5,9 @@
                         and nothing else runs. A key phrase must be one contiguous piece of its
                         expression (schemas.py drops a candidate whose is not)
     candidates_retry    a compare request with fewer than 3 valid candidates: the call once more
-    search_1..6         one search per candidate: passages containing its key phrase first
+    search_1..6         one search per candidate: passages containing its key phrase first. With
+                        search_workers > 1 the six run at once (session.prefetching); they are
+                        still recorded and applied in candidate order, as if run one by one
     select_1            one model call picks at most one span per candidate
     validate_select_1   code verifies each pick (evidence.py); the 3 answer slots are the
                         verified candidates first in rank order, then unsupported ones
@@ -16,7 +18,7 @@ from ..evidence import SHOW_FEEDS
 from ..prompts.prefix import CANDIDATES_PROMPT
 from ..schemas.prefix import CandidateSet
 from ..session import Budget, CoachError, RequestSession
-from ..tools import search_slot, select, validate
+from ..tools import search_slot, select, slot_searches, validate
 
 FIRST_STAGE_BUDGET = Budget(model_calls=3, searches=6)  # candidates, one retry of them, select
 DECLINE_NOTES = {
@@ -43,8 +45,10 @@ def run_first_stage(session: RequestSession, question: str) -> Draft:
         raise CoachError("invalid_model_output")
     draft = Draft(question, [Slot(candidate, rank) for rank, candidate in enumerate(generated.candidates)],
                   feeds=[SHOW_FEEDS[generated.source_show]] if generated.source_show else None)
-    for index in range(len(draft.slots)):
-        search_slot(session, draft, index, stage=f"search_{index + 1}", ref_prefix=f"c{index}")
+    indices = list(range(len(draft.slots)))
+    with session.prefetching(slot_searches(draft, indices)):
+        for index in indices:
+            search_slot(session, draft, index, stage=f"search_{index + 1}", ref_prefix=f"c{index}")
     select(session, draft, "select_1", list(range(len(draft.slots))))
     draft.narrow()
     validate(session, draft, "validate_select_1", alternatives=[c.expression for c in draft.alternatives])

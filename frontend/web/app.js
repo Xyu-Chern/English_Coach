@@ -73,6 +73,9 @@ let libraryFilter = "all",
 // Staged answers (D1): the first verified examples arrive at once; a background search may add
 // more. notice = {kind, id} is the banner above the chat; running holds the ids still searching.
 let notice = null;
+// The quick translation of the request in flight (PR5): {ticket, text, note}. A model's line sent
+// before any podcast check; it is generated, never a verified example.
+let quick = null;
 const running = new Set();
 const RUNNING_LIMIT = 1; // the server answers one request per process, so wait for the search to end
 const SLOW_SECONDS = 30; // after this the wait line says the examples take a little longer
@@ -183,6 +186,7 @@ function home() {
         esc(turn.question) +
         "</div>" +
         '<div class="assistant-message">' +
+        quickBubble(turn.quick, true) +
         turn.expressions.map(resultCard).join("") +
         more(turn) +
         (turn.note ? "<p>" + esc(turn.note) + "</p>" : "") +
@@ -201,6 +205,7 @@ function home() {
       ? '<div class="user-message">' +
         esc(lastQuestion) +
         "</div>" +
+        quickBubble(liveQuick()) +
         (pending
           ? '<div class="waiting">' +
             mascot(true) +
@@ -287,6 +292,25 @@ function holdText() {
     "앞 질문의 예문 찾기가 끝나면 보낼 수 있어요",
   );
 }
+// The quick translation (PR5) has its own label and no save button: it was generated before any
+// podcast check. Once verified examples arrive (done) it stays above them, smaller and muted.
+function quickBubble(qk, done = false) {
+  if (!qk || typeof qk.text !== "string" || !qk.text) return "";
+  return (
+    '<div class="quick' +
+    (done ? " done" : "") +
+    '"><p class="quick-label">' +
+    T("快速翻译 · 尚未核对播客例句", "빠른 번역 · 팟캐스트 예문 확인 전") +
+    '</p><p class="quick-text" lang="en">' +
+    esc(qk.text) +
+    "</p>" +
+    (qk.note ? '<p class="quick-note">' + esc(qk.note) + "</p>" : "") +
+    "</div>"
+  );
+}
+function liveQuick() {
+  return quick && quick.ticket === ticket ? quick : null;
+}
 let waitStart = 0,
   waitTick = 0;
 function waitingLine() {
@@ -294,7 +318,9 @@ function waitingLine() {
   return [
     s >= SLOW_SECONDS
       ? T("还在核对例句，需要多一点时间…", "예문을 찾느라 조금 더 걸려요…")
-      : T("正在查找表达…", "표현을 찾고 있어요…"),
+      : liveQuick()
+        ? T("正在核对播客例句…", "팟캐스트 예문을 확인하고 있어요…")
+        : T("正在查找表达…", "표현을 찾고 있어요…"),
     T(s + " 秒", s + "초"),
   ];
 }
@@ -686,6 +712,7 @@ function resultPage() {
   if (pending && !active)
     return (
       head +
+      quickBubble(liveQuick()) +
       '<div class="status"><span class="spinner"></span>' +
       T(
         "教练正在找表达、核对字幕。你可以先浏览表达库。",
@@ -726,6 +753,7 @@ function resultPage() {
           "코치 제안 · 출처를 펼쳐 실제 쓰임을 확인하세요",
         )) +
     "</p>" +
+    quickBubble(active.quick, true) +
     active.expressions.map(resultCard).join("") +
     (Array.isArray(active.added) && active.added.length
       ? '<h2 class="more-head">' +
@@ -995,6 +1023,7 @@ function answered(req, expressions, note, extra = {}) {
     turns.push(entry);
   }
   pending = false;
+  quick = null; // the entry carries it now (entry.quick), shown above its examples
   stopWaiting();
   if (entry.stage === "pending") {
     running.add(entry.id);
@@ -1049,27 +1078,51 @@ function settle(entry, stage, added = []) {
     renderNotice();
   }
 }
-// Accept: NDJSON. first: the verified examples (final); final: the whole answer, of which only the
+// The quick line arrived before any answer: show it at once, labelled as not yet checked.
+function showQuick(req, ev) {
+  const text = typeof ev.text === "string" ? ev.text.trim().slice(0, 400) : "";
+  if (!text || !pending || ticket !== req.ticket) return null;
+  const note = typeof ev.note === "string" ? ev.note.trim().slice(0, 400) : "";
+  quick = { ticket: req.ticket, text, note };
+  say(
+    T(
+      "快速翻译：" + text + "。正在核对播客例句。",
+      "빠른 번역: " + text + ". 팟캐스트 예문을 확인하고 있어요.",
+    ),
+  );
+  const page = location.hash.slice(1) || "home";
+  if (page === "home" || page === "answer") {
+    render();
+    if (page === "home") document.querySelector("#ask")?.scrollIntoView({ block: "nearest" });
+  }
+  return { text, note };
+}
+// Accept: NDJSON. quick (optional, before any answer): a generated line, shown apart from the
+// examples; first: the verified examples (final); final: the whole answer, of which only the
 // examples at the added indexes are new; error: the search ended. A first that is still pending
 // leaves its empty slots to the background search; unverified candidates are never shown after it.
 async function staged(r, req) {
-  let entry = null;
+  let entry = null,
+    fast = null;
+  const extra = (more = {}) => (fast ? { quick: fast, ...more } : more);
   try {
     for await (const ev of ndjson(r.body)) {
       if (!ev || typeof ev !== "object") continue;
-      if (ev.type === "first" && !entry) {
+      if (ev.type === "quick") {
+        if (!entry && !fast) fast = showQuick(req, ev);
+      } else if (ev.type === "first" && !entry) {
         const pendingMore = ev.pending === true;
         entry = answered(
           req,
           expressionList(ev.expressions).filter(verified),
           ev.note,
-          pendingMore ? { stage: "pending", added: [] } : {},
+          extra(pendingMore ? { stage: "pending", added: [] } : {}),
         );
         if (!pendingMore) return;
       } else if (ev.type === "final") {
         const all = Array.isArray(ev.expressions) ? ev.expressions : [];
         if (!entry) {
-          answered(req, expressionList(all), ev.note);
+          answered(req, expressionList(all), ev.note, extra());
           return;
         }
         const shown = new Set(entry.expressions.map(key)),
@@ -1128,6 +1181,7 @@ async function ask(resumeId = null, again = null) {
   pending = true;
   active = null;
   failed = "";
+  quick = null;
   if (notice && notice.kind !== "running") notice = null;
   startWaiting();
   go("home");

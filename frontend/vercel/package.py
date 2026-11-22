@@ -45,6 +45,7 @@ LIVE_ADMIN_PATHS = ("/admin/requests.json", "/admin/mode")  # answered by the fu
 FUNCTION_FILES = (
     "frontend/server.py",
     "frontend/staged.py",
+    "frontend/quick.py",
     "frontend/request_log.py",
     "frontend/sql/request_log.sql",
     "frontend/admin_data.py",

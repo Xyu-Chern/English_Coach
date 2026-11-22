@@ -15,8 +15,8 @@ session (session.search), which wraps translation_agent_demo/tools/search_corpus
 
 from .assemble import assemble, new_log, validate
 from .change import ReplaceAction, RepickAction, as_candidate, change_slot
-from .search import SearchAction, identical_search, search, search_slot
+from .search import SearchAction, identical_search, search, search_args, search_slot, slot_searches
 from .select import select
 
-__all__ = ["search", "search_slot", "identical_search", "select", "change_slot", "as_candidate", "validate",
-           "new_log", "assemble", "SearchAction", "RepickAction", "ReplaceAction"]
+__all__ = ["search", "search_slot", "search_args", "slot_searches", "identical_search", "select", "change_slot",
+           "as_candidate", "validate", "new_log", "assemble", "SearchAction", "RepickAction", "ReplaceAction"]

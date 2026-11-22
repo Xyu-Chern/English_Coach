@@ -11,12 +11,25 @@ again, so each system reports first stage + its own continuation.
 
 Items a reply loses to validation are kept until the system's next decision call takes them
 (take_dropped), so that call is told what its last turn lost (dropped_last_turn).
+
+Every trace step says when it started (details.started_ms): milliseconds since the request's first
+session started; a continuation counts from the carried prefix's end (prefix.elapsed_ms).
+
+Independent searches can overlap (CoachDependencies.search_workers > 1): a step that knows its
+searches in advance (the first stage's six, a baseline round's) starts them at once with
+prefetching(), then asks for them one by one as before. search() takes the prefetched result
+instead of calling the tool, but checks the budget, records the step and raises exactly as it
+would have, in the order it is asked: trace, budgets and results are the sequential ones; only
+the waiting overlaps. The session's bookkeeping is guarded by a lock, so it is thread-safe too.
 """
 
 import json
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Callable, TypeVar
+from typing import Callable, Iterator, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
@@ -50,6 +63,14 @@ class CoachDependencies:
     model: ChatModel | ObservedChatModel
     search: SearchCorpus
     clock: Callable[[], float] = time.perf_counter
+    # How many of a step's independent searches may run at once. 1 (the default): one after another.
+    # More needs a search that is safe to call from that many threads at once (its own connection
+    # per call, no order-dependent state); results and trace stay the sequential ones either way.
+    search_workers: int = 1
+
+    def __post_init__(self):
+        if type(self.search_workers) is not int or not 1 <= self.search_workers <= 9:
+            raise ValueError("search_workers must be 1 to 9.")
 
 
 @dataclass(frozen=True)
@@ -98,11 +119,14 @@ class RequestSession:
 
     def __post_init__(self):
         self.started = self.deps.clock()
+        self.offset_ms = self.prefix.elapsed_ms if self.prefix else 0.0  # where this session starts in the request
         self.trace: list[TraceSpan] = []
         self.tool_calls: list[ToolCall] = []
         self.chat_usage: list[ModelUsage] = []
-        self.embedding_usage: list[int | None] = []
+        self.embedding_usage: list[int | None] = []  # one entry per search started (its budget is taken then)
         self.dropped: list[dict] = []  # {step, slot, reason, list, index, field, error} not yet shown
+        self._lock = threading.RLock()
+        self._prefetched: dict[str, list[Future]] = {}  # searches started early, by their arguments
 
     # ----------------------------------------------------------- budgets
     @property
@@ -115,24 +139,30 @@ class RequestSession:
 
     @property
     def searches_used(self) -> int:
-        return len(self.tool_calls)
+        return len(self.embedding_usage)
 
     @property
     def searches_left(self) -> int:
         return self.budget.searches - self.searches_used
+
+    @property
+    def parallel_searches(self) -> bool:
+        return self.deps.search_workers > 1
 
     # ----------------------------------------------------------- tools
     def ask(self, stage: str, prompt: str, payload: dict, schema: type[T]) -> T:
         """One budgeted model call, decoded against the schema (structured outputs) and validated.
 
         Invalid list items are dropped and recorded; any other mismatch fails the step."""
-        if self.model_calls_left <= 0:
-            raise CoachError("model_budget_exhausted")
-        started = self.deps.clock()
-        self.chat_usage.append(ModelUsage())
+        with self._lock:
+            if self.model_calls_left <= 0:
+                raise CoachError("model_budget_exhausted")
+            started, position = self.deps.clock(), len(self.chat_usage)
+            self.chat_usage.append(ModelUsage())
         try:
             response = self._complete(prompt, json.dumps(payload, ensure_ascii=False), response_format(schema))
-            self.chat_usage[-1] = response.usage
+            with self._lock:
+                self.chat_usage[position] = response.usage
         except Exception as exc:  # only an unreachable model is an infrastructure failure
             code = getattr(exc, "code", None)
             code = code if code in MODEL_ANSWER_ERRORS else "model_unavailable"
@@ -146,16 +176,41 @@ class RequestSession:
             self.record(stage, started, error="invalid_model_output")
             raise CoachError("invalid_model_output") from None
         details = {"dropped_items": dropped} if dropped else {}
-        self.dropped += [{"step": stage, "slot": item.get("slot"), "reason": drop_reason(item),
-                          **{key: item.get(key) for key in ("list", "index", "field", "error")}} for item in dropped]
+        with self._lock:
+            self.dropped += [{"step": stage, "slot": item.get("slot"), "reason": drop_reason(item),
+                              **{key: item.get(key) for key in ("list", "index", "field", "error")}}
+                             for item in dropped]
         self.record(stage, started, model=response.model, input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens, output=parsed.model_dump(mode="json"), **details)
         return parsed
 
     def take_dropped(self) -> list[dict]:
         """Items dropped since the last take: what the next decision call is told it lost."""
-        dropped, self.dropped = self.dropped, []
+        with self._lock:
+            dropped, self.dropped = self.dropped, []
         return dropped
+
+    @contextmanager
+    def prefetching(self, searches: list[SearchCorpusArgs]) -> Iterator[None]:
+        """Start these searches at once (deps.search_workers threads) for search() to take inside the block.
+
+        Nothing happens with one worker, one search or no budget. At most searches_left start; a
+        search() with other arguments, or after its prefetched twin was taken, calls the tool as
+        usual. Prefetched searches not taken by the end of the block are dropped (not recorded,
+        not counted; the tool may still have run them)."""
+        searches = list(searches)[:max(0, self.searches_left)]
+        workers = min(self.deps.search_workers, len(searches))
+        if workers > 1:
+            pool = ThreadPoolExecutor(workers, thread_name_prefix="coach-search")
+            with self._lock:
+                for args in searches:
+                    self._prefetched.setdefault(_search_key(args), []).append(pool.submit(self._call_search, args))
+            pool.shutdown(wait=False)  # the submitted searches still run; nothing waits for them here
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._prefetched.clear()
 
     def search(self, args: SearchCorpusArgs, *, policy: str, stage: str | None = None,
                **details) -> SearchOutcome:
@@ -163,40 +218,61 @@ class RequestSession:
 
         details (for example the slot it is for) are added to the trace step, with corpus_count:
         the whole-corpus number of chunks containing the literal phrase (0: absent from the corpus)."""
-        if self.searches_left <= 0:
-            raise CoachError("search_budget_exhausted")
-        stage, started = stage or f"search_{self.searches_used + 1}", self.deps.clock()
+        with self._lock:
+            if self.searches_left <= 0:
+                raise CoachError("search_budget_exhausted")
+            stage, position = stage or f"search_{self.searches_used + 1}", len(self.embedding_usage)
+            self.embedding_usage.append(None)
+            waiting = self._prefetched.get(_search_key(args))
+            prefetched = waiting.pop(0) if waiting else None
         details = {**details, "query": args.query, "key_phrase": args.literal_phrase}
         encoded = args.model_dump(mode="json")
-        self.embedding_usage.append(None)
-        try:
-            result = self.deps.search(args)
-            _check_search_result(args, result)
-        except Exception as exc:
-            code = exc.code if isinstance(exc, SearchCorpusError) else "search_unavailable"
-            self.tool_calls.append(ToolCall(args=encoded, status="error", error_code=code))
-            self.record(stage, started, error=code, **details)
+        started, ended, result, failure = prefetched.result() if prefetched else self._call_search(args)
+        if failure is not None:
+            code = failure.code if isinstance(failure, SearchCorpusError) else "search_unavailable"
+            with self._lock:
+                self.tool_calls.append(ToolCall(args=encoded, status="error", error_code=code))
+            self.record(stage, started, ended=ended, error=code, **details)
             raise CoachError(code) from None
-        self.embedding_usage[-1] = result.input_tokens
-        self.tool_calls.append(ToolCall(args=encoded, status=result.status))
+        with self._lock:
+            self.embedding_usage[position] = result.input_tokens
+            self.tool_calls.append(ToolCall(args=encoded, status=result.status))
         if result.status == "not_ready":
-            self.record(stage, started, error="corpus_not_ready", **details)
+            self.record(stage, started, ended=ended, error="corpus_not_ready", **details)
             raise CoachError("corpus_not_ready")
         corpus_count = result.literal_corpus_count if args.literal_phrase else None
-        self.record(stage, started, **details, hits=[hit_summary(hit, args.literal_phrase) for hit in result.hits],
+        self.record(stage, started, ended=ended, **details,
+                    hits=[hit_summary(hit, args.literal_phrase) for hit in result.hits],
                     embedding_tokens=result.input_tokens, embedding_model=result.model,
                     search_mode=result.search_mode, literal_candidate_count=result.literal_candidate_count,
                     corpus_count=corpus_count, query_policy=policy)
         return SearchOutcome(list(result.hits), corpus_count)
 
-    def record(self, stage: str, started: float | None = None, *, error: str | None = None, **details) -> None:
-        """Append one trace span; started defaults to now (a zero-length step)."""
-        now = self.deps.clock()
+    def _call_search(self, args: SearchCorpusArgs) -> tuple[float, float, SearchCorpusResult | None, Exception | None]:
+        """The tool call itself and its check: (started, ended, result, failure). Safe to run in a worker thread:
+        it touches no session state."""
+        started = self.deps.clock()
+        try:
+            result = self.deps.search(args)
+            _check_search_result(args, result)
+        except Exception as exc:
+            return started, self.deps.clock(), None, exc
+        return started, self.deps.clock(), result, None
+
+    def record(self, stage: str, started: float | None = None, *, ended: float | None = None,
+               error: str | None = None, **details) -> None:
+        """Append one trace span; started defaults to now (a zero-length step), ended to now.
+
+        details.started_ms: when it started, in milliseconds since the request started (offset_ms)."""
+        now = self.deps.clock() if ended is None else ended
+        start = now if started is None else started
         if error:
             details["error_code"] = error
-        self.trace.append(TraceSpan(stage=stage, status="error" if error else "ok",
-                                    elapsed_ms=max(0.0, (now - (now if started is None else started)) * 1000),
-                                    details=details))
+        details["started_ms"] = round(self.offset_ms + max(0.0, (start - self.started) * 1000), 1)
+        span = TraceSpan(stage=stage, status="error" if error else "ok", elapsed_ms=max(0.0, (now - start) * 1000),
+                         details=details)
+        with self._lock:
+            self.trace.append(span)
 
     # ----------------------------------------------------------- outcome
     @property
@@ -239,6 +315,10 @@ class RequestSession:
                 raise TypeError("Expected ChatCompletion.")
             return response
         return ChatCompletion(self.deps.model.complete(system_prompt=prompt, user_payload=payload))
+
+
+def _search_key(args: SearchCorpusArgs) -> str:
+    return args.model_dump_json()
 
 
 def _total(values) -> int | None:
