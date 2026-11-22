@@ -1,6 +1,6 @@
 # Three-Week Project Roadmap — AI English Speaking Phrase Agent
 
-> **Status:** Proposed schedule. English version first; Chinese and Korean versions follow. This file is the execution plan only. `design.md` is the source of truth for product scope, system behavior, technical choices, acceptance criteria, and interview coverage.
+> **Status:** Course submitted; the extension work is tracked below (updated 2026-11-22). English version first; Chinese and Korean versions follow. This file is the execution plan only. `design.md` is the source of truth for product scope, system behavior, technical choices, acceptance criteria, and interview coverage.
 
 ## Planning assumptions
 
@@ -175,7 +175,9 @@ When work begins, update the progress board and record only the status plus a sh
 
 Done. The web study interface and installed Android app were tested with questions, transcript sources, persistent bookmarks, history and offline access. The local web client received a live ExpressionCoach answer. Build and installation instructions are in `frontend/README.md`.
 
-The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
+The teammate's live Vercel deployment is described in `design.md` (Learner clients); our own Vercel project is tracked under P3–P4 below.
+
+All suites passed on 2026-11-22: coach 142, evaluation 126 (5 skipped), frontend 116 (its database tests ran against the local Docker Postgres).
 
 ### Staged answers, verified-slot lock and admin page (D1–D6)
 
@@ -190,7 +192,7 @@ Scope, contracts and known gaps are in `design.md` (Learner clients). G6 made th
 | G5 | Admin design on real data | G4 | Done | Design B in `frontend/admin/`: four tabs including Mode comparison, Korean, Chinese and English; drawn from sample data on the local server |
 | G6 | D6 re-evaluation: baseline and the locked agent, 50 tasks × 3, then grading | G1 | Done | Run `lock-20261122` on 2026-11-22, $3.63; results in `design.md` |
 | G7 | Three-language documentation | G1–G5 | Done | `design.md`, `frontend/README.md`, `README.md`, this file |
-| G8 | Release: commit, package in WSL with the D6 data, rebuild the APK, deploy, then check streaming on Vercel and Android, `/admin`, the log lines, the saved rows and the mode switch | G3, G5, G6, G9–G11, G13 | Not started | Needs judgment question 1 and G13 |
+| G8 | Release: commit, package with the D6 data, rebuild the APK, deploy, then check streaming on Vercel and Android, `/admin`, the log lines, the saved rows, the daily count and the mode switch | G3, G5, G6, G9–G11, G13, L6, A1–A6, P1–P4 | Not started | Needs judgment question 1, G13 and P4 |
 
 **D6 result (2026-11-22):** the lock held (0 requests lost a first-stage verified example; all 93 fully verified requests skipped the continuation), but the locked agent no longer beats the baseline: pass 85.3% for both, strict 54.0% vs 55.3% (−1.6 pp, 95% CI −6.2 to +2.3). Actual cost $3.63. The full figures are in `design.md` (Re-evaluation (D6)), and the open question on the deployed default is R1 there.
 
@@ -200,9 +202,9 @@ Contracts and known gaps are in `design.md` (Mode and request log, Admin API). T
 
 | ID | Sub-goal | Depends on | Status | Latest check |
 |---|---|---|---|---|
-| G9 | Postgres request log: tables at start, one row per request, `GET /admin/requests.json` | G2 | In progress | Acceptance: server tests against the local Docker Postgres |
-| G10 | Mode from the database (10 s cache, `COACH_SYSTEM` fallback), `GET`/`POST /admin/mode`, optional `COACH_ADMIN_TOKEN` | G9 | In progress | Acceptance: server tests against the local Docker Postgres |
-| G11 | Admin page: live requests, the mode in effect and the switch, in Korean, Chinese and English | G5, G9, G10 | In progress | Acceptance: the local server with the Docker Postgres |
+| G9 | Postgres request log: tables at start, one row per request, `GET /admin/requests.json` | G2 | Done | 2026-11-22: server tests pass against the local Docker Postgres (0 skipped) |
+| G10 | Mode from the database (10 s cache, `COACH_SYSTEM` fallback), `GET`/`POST /admin/mode`, `COACH_ADMIN_TOKEN` (required on Vercel) | G9 | Done | 2026-11-22: server tests pass against the local Docker Postgres (0 skipped) |
+| G11 | Admin page: live requests, the mode in effect and the switch, in Korean, Chinese and English | G5, G9, G10 | Done | Checked on the local server with the Docker Postgres; after the cleanup the page is 8 files and 120 before/after screens matched |
 | G12 | Three-language documentation | G9–G11 | Done | `design.md`, `frontend/README.md`, this file |
 | G13 | The owner attaches Neon (free plan) to the Vercel project | — | Not started | Owner only: the Hobby plan cannot invite members |
 
@@ -215,16 +217,43 @@ Scope and contracts are in `design.md` (Learner clients → Faster first answer)
 | ID | Sub-goal | Depends on | Status | Latest check |
 |---|---|---|---|---|
 | L1 | Server: parallel first-stage searches, the `quick` line (3 s limit, `COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`), `quick_ms` in the log line, `started_ms` in trace steps | G2 | Done | 2026-11-22: coach 113, evaluation 126 (5 skipped), frontend 71 tests pass |
-| L2 | Learner app: show the `quick` line in Chinese and Korean, marked as a generated suggestion | L1 | In progress | Pending: headless browser check |
+| L2 | Learner app: show the `quick` line in Chinese and Korean, marked as a generated suggestion | L1 | Done | 2026-11-22: headless browser screenshots (Korean phone before `first`, Chinese desktop after) |
 | L3 | Three-language documentation | L1 | Done | `design.md`, `frontend/README.md`, this file |
 | L4 | Measure time to `quick` and to `first`, before and after | L1, L2 | Done | 2026-11-22, Claude Haiku 5.5, local: `quick` p50 0.98 s / p95 1.41 s (2 s target met); `first` p50 16.1 s; first stage 20.0 → 16.3 s at p50 with parallel searches |
+| L5 | Fast first stage (PR ⑦): 3 candidates, compact prompts and spans, one embedding call, Claude Haiku 5.5 without thinking; `COACH_FIRST_*` settings, `full` to roll back | L1 | Done | 2026-11-22, 12 Korean questions, local: `first` p50 14.6 → 5.2 s (p95 6.0 s), `quick` p50 0.99 s; 1.5 verified examples at once instead of 2.4 (`design.md` R5). Tests then: coach 129, evaluation 126 (5 skipped), frontend 87 |
+| L6 | Parallel fast path (the app default): streamed candidates, per-candidate search and selection, 0.4 s grace, trigram index (migration 014) | L5 | Done | 2026-11-22, 12 Korean questions, local: `first` p50 5.2 → 4.1 s (p95 4.5 s), `quick` p50 0.96 s; the 1–2 s goal is not met (`design.md` R5) |
+
+### Podcast audio clips (PR ⑥)
+
+Contract, positions and known gaps are in `design.md` (Podcast audio clips); setup commands are in `frontend/README.md`. No paid calls.
+
+| ID | Sub-goal | Depends on | Status | Latest check |
+|---|---|---|---|---|
+| A1 | Audio data: migration 010, `podcast_audio backfill`, audio fields on hits and citations | — | Done | 1,460 of 1,460 transcript episodes have audio; unit tests pass |
+| A2 | Time markers: migration 013, `podcast_audio anchors`, interpolated positions | A1 | Done | 1,157 of 1,167 searchable documents have markers; 10 of 11 spot checks within ±14 s |
+| A3 | Alignment API and local ASR: `GET /api/audio/alignment`, migration 011 cache, faster-whisper, `frontend.audio_align` | A2 | Done | Unit tests pass; recognised clips played in headless Chrome |
+| A4 | Clip player: loop, range, speed, captions, in Chinese and Korean | A3 | Done | Headless browser checks (Korean phone, Chinese desktop) |
+| A5 | Three-language documentation | A1–A4 | Done | `design.md`, `frontend/README.md`, this file |
+| A6 | Deployed audio: snapshot audio fields and bundled alignments | A1–A3 | In progress | Our package: marker positions for 36,050 chunks and 85 ASR alignments; the rest of the 313 cited chunks are still aligning. The teammate's package needs 010 and the backfill in WSL |
+
+### Daily cap, security and our own Vercel deployment (2026-11-22)
+
+Contracts and decisions D8–D9 are in `design.md`; owner steps are in `frontend/README.md` (Own Vercel deployment).
+
+| ID | Sub-goal | Depends on | Status | Latest check |
+|---|---|---|---|---|
+| P1 | Daily cap: `COACH_DAILY_LIMIT` / `COACH_DAILY_TZ`, `coach_daily_usage`, 429 `daily_limit`, 503 `daily_limit_unavailable`, the two headers, the remaining count in the app | G9 | Done | Server tests pass (frontend 116) |
+| P2 | Security: no mode switch on Vercel without the token, root `.gitignore`, admin data allowlist and leak check, request slot held until the work stops | G2, G4, G10 | Done | Server and admin data tests pass |
+| P3 | Own Vercel package: `own_snapshot align` / `package`, `own_index.py`, all 36,397 approved chunks | A6 | Done | Built and checked locally: about 461 MB of the 500 MB limit; not deployed |
+| P4 | Owner deploys our own project: login, project, Neon, secrets, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | Not started | Owner only |
+| P5 | Three-language documentation | P1–P3 | Done | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, this file |
 
 ## Project Owner Judgment Questions
 
-1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that WSL can package the same `/admin`? The detail and the recommendation are in `frontend/README.md`, judgment question 2.
-2. **Neon setup (owner action, blocks G8):** attach Neon in the Vercel dashboard (G13; steps in `frontend/README.md`). Whether to set `COACH_ADMIN_TOKEN` and how long to keep saved questions are judgment questions R2 and R3 in `design.md`.
+1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that any machine can package the same `/admin`? Our own package takes a prebuilt file with `--admin-data`. The detail and the recommendation are in `frontend/README.md`, judgment question 2.
+2. **Neon and our own deployment (owner action, blocks G8 and P4):** attach Neon and deploy our own Vercel project (G13, P4; steps in `frontend/README.md`). The admin token and how long questions are kept are settled (`design.md`, decision log).
 
-The re-evaluation raised one question, on the submission wording and the deployed default: judgment question R1 in `design.md`.
+Open in `design.md`: R1 (submission wording and the deployed default after D6), R4 (narrowing the citation's audio fields to the quote) and R5 (how far the fast first stage should go).
 
 The open question on a coach question during a background search is in `frontend/README.md` (judgment question 1).
 
@@ -234,7 +263,7 @@ The four original planning questions (course constraints, time, resources, team)
 
 # 三周项目进度 — AI 英语口语表达 Agent
 
-> **状态：**拟定进度计划。英文版在前，其后依次为中文版和韩文版。本文件只负责执行进度；产品范围、系统行为、技术选择、验收标准和面试能力映射以 `design.md` 为准。
+> **状态：**课程已提交；扩展工作在下方跟踪（2026-11-22 更新）。英文版在前，其后依次为中文版和韩文版。本文件只负责执行进度；产品范围、系统行为、技术选择、验收标准和面试能力映射以 `design.md` 为准。
 
 ## 计划假设
 
@@ -409,7 +438,9 @@ flowchart LR
 
 已完成。网页与安装后的 Android 应用均通过提问、字幕出处、收藏持久化、历史和离线验收。本机网页已收到 ExpressionCoach 真实回答。构建和安装见 `frontend/README.md`。
 
-Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
+队友的线上 Vercel 部署见 `design.md`（学习客户端）；我们自己的 Vercel 项目在下方 P3–P4 跟踪。
+
+2026-11-22 全部测试通过：教练 142、评估 126（跳过 5）、前端 116（其中数据库测试在本地 Docker Postgres 上运行）。
 
 ### 分阶段回答、核对位置锁定与管理页（D1–D6）
 
@@ -424,7 +455,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | G5 | 用真实数据完成管理页设计 | G4 | 完成 | 设计稿 B 放在 `frontend/admin/`：含「模式对比」在内的四个标签页，韩文、中文、英文；在本地服务上用样例数据绘制 |
 | G6 | D6 重新评估：baseline 和加锁的 agent，50 题 × 3 次，再评分 | G1 | 完成 | 2026-11-22 运行 `lock-20261122`，3.63 美元；结果见 `design.md` |
 | G7 | 三语文档 | G1–G5 | 完成 | `design.md`、`frontend/README.md`、`README.md` 和本文件 |
-| G8 | 发布：提交，在 WSL 中用 D6 数据打包，重新构建 APK，部署，然后检查 Vercel 和 Android 上的流式传输、`/admin`、日志行、保存的行和模式切换 | G3、G5、G6、G9–G11、G13 | 未开始 | 需要判断题 1 和 G13 |
+| G8 | 发布：提交，用 D6 数据打包，重新构建 APK，部署，然后检查 Vercel 和 Android 上的流式传输、`/admin`、日志行、保存的行、每日计数和模式切换 | G3、G5、G6、G9–G11、G13、L6、A1–A6、P1–P4 | 未开始 | 需要判断题 1、G13 和 P4 |
 
 **D6 结果（2026-11-22）：** 锁定生效（丢失第一阶段核对通过例句的请求为 0；93 个全部核对通过的请求都跳过了后续阶段），但加锁的 agent 不再优于 baseline：通过率都是 85.3%，严格通过率 54.0% 对 55.3%（−1.6 个百分点，95% 置信区间 −6.2 至 +2.3）。实际费用 3.63 美元。完整数据见 `design.md`（重新评估（D6）），关于部署默认值的待决问题是其中的 R1。
 
@@ -434,9 +465,9 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 | 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
 |---|---|---|---|---|
-| G9 | Postgres 请求日志：启动时建表，每个请求一行，`GET /admin/requests.json` | G2 | 进行中 | 验收：在本地 Docker Postgres 上通过服务端测试 |
-| G10 | 从数据库读取模式（缓存 10 秒，退回 `COACH_SYSTEM`），`GET`/`POST /admin/mode`，可选 `COACH_ADMIN_TOKEN` | G9 | 进行中 | 验收：在本地 Docker Postgres 上通过服务端测试 |
-| G11 | 管理页：线上请求、当前生效的模式和切换，韩文、中文、英文 | G5、G9、G10 | 进行中 | 验收：在接入 Docker Postgres 的本地服务上检查 |
+| G9 | Postgres 请求日志：启动时建表，每个请求一行，`GET /admin/requests.json` | G2 | 完成 | 2026-11-22：服务端测试在本地 Docker Postgres 上通过（跳过 0） |
+| G10 | 从数据库读取模式（缓存 10 秒，退回 `COACH_SYSTEM`），`GET`/`POST /admin/mode`，`COACH_ADMIN_TOKEN`（Vercel 上必需） | G9 | 完成 | 2026-11-22：服务端测试在本地 Docker Postgres 上通过（跳过 0） |
+| G11 | 管理页：线上请求、当前生效的模式和切换，韩文、中文、英文 | G5、G9、G10 | 完成 | 已在接入 Docker Postgres 的本地服务上检查；整理后页面为 8 个文件，整理前后 120 个画面一致 |
 | G12 | 三语文档 | G9–G11 | 完成 | `design.md`、`frontend/README.md` 和本文件 |
 | G13 | 项目负责人把 Neon（免费计划）接入 Vercel 项目 | — | 未开始 | 只能由项目负责人操作：Hobby 计划不能邀请成员 |
 
@@ -449,16 +480,43 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
 |---|---|---|---|---|
 | L1 | 服务端：第一阶段并行检索，`quick` 行（3 秒上限，`COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`），日志行中的 `quick_ms`，trace 步骤中的 `started_ms` | G2 | 完成 | 2026-11-22：教练 113、评估 126（跳过 5）、前端 71 个测试通过 |
-| L2 | 学习端：用中文和韩文显示 `quick` 行，并标明是生成的建议 | L1 | 进行中 | 待完成：无头浏览器检查 |
+| L2 | 学习端：用中文和韩文显示 `quick` 行，并标明是生成的建议 | L1 | 完成 | 2026-11-22：无头浏览器截图（`first` 之前的韩文手机画面，之后的中文桌面画面） |
 | L3 | 三语文档 | L1 | 完成 | `design.md`、`frontend/README.md` 和本文件 |
 | L4 | 测量改动前后到 `quick` 和到 `first` 的时间 | L1、L2 | 完成 | 2026-11-22，Claude Haiku 5.5，本地：`quick` p50 0.98 秒 / p95 1.41 秒（达到 2 秒目标）；`first` p50 16.1 秒；并行检索使第一阶段 p50 从 20.0 秒降到 16.3 秒 |
+| L5 | 快速第一阶段（PR ⑦）：3 个候选、精简提示词和片段、一次向量调用、Claude Haiku 5.5 不思考；`COACH_FIRST_*` 设置，`full` 可回退 | L1 | 完成 | 2026-11-22，12 个韩语问题，本地：`first` p50 14.6 → 5.2 秒（p95 6.0 秒），`quick` p50 0.99 秒；一次核对通过 1.5 个例句，而不是 2.4 个（`design.md` R5）。当时的测试：教练 129、评估 126（跳过 5）、前端 87 |
+| L6 | 并行快速路径（应用默认）：流式候选、按候选检索和选择、0.4 秒等待、trigram 索引（迁移 014） | L5 | 完成 | 2026-11-22，12 个韩语问题，本地：`first` p50 5.2 → 4.1 秒（p95 4.5 秒），`quick` p50 0.96 秒；未达到 1–2 秒目标（`design.md` R5） |
+
+### 播客音频片段（PR ⑥）
+
+接口约定、位置和已知差距见 `design.md`（播客音频片段）；设置命令见 `frontend/README.md`。没有付费调用。
+
+| 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
+|---|---|---|---|---|
+| A1 | 音频数据：迁移 010、`podcast_audio backfill`、检索结果和出处上的音频字段 | — | 完成 | 有字幕的 1,460 集全部有音频；单元测试通过 |
+| A2 | 时间标记：迁移 013、`podcast_audio anchors`、插值位置 | A1 | 完成 | 1,167 个可搜索文稿中 1,157 个有时间标记；11 处抽查中 10 处误差在 ±14 秒内 |
+| A3 | 对齐 API 和本地语音识别：`GET /api/audio/alignment`、迁移 011 缓存、faster-whisper、`frontend.audio_align` | A2 | 完成 | 单元测试通过；语音识别片段在无头 Chrome 中能播放 |
+| A4 | 片段播放器：循环、范围、速度、字幕，中文和韩文 | A3 | 完成 | 无头浏览器检查（韩文手机、中文桌面） |
+| A5 | 三语文档 | A1–A4 | 完成 | `design.md`、`frontend/README.md` 和本文件 |
+| A6 | 部署中的音频：快照音频字段和随包的对齐 | A1–A3 | 进行中 | 我们的包：36,050 个片段有时间标记位置，85 个语音识别对齐；313 个被引用片段中其余的仍在对齐。队友的包需要在 WSL 中应用 010 并运行回填 |
+
+### 每日上限、安全和我们自己的 Vercel 部署（2026-11-22）
+
+接口约定和决定 D8–D9 见 `design.md`；项目负责人的步骤见 `frontend/README.md`（自有 Vercel 部署）。
+
+| 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
+|---|---|---|---|---|
+| P1 | 每日上限：`COACH_DAILY_LIMIT` / `COACH_DAILY_TZ`、`coach_daily_usage`、429 `daily_limit`、503 `daily_limit_unavailable`、两个响应头、应用中的剩余次数 | G9 | 完成 | 服务端测试通过（前端 116） |
+| P2 | 安全：Vercel 上没有令牌就不能切换模式、根目录 `.gitignore`、管理页数据的允许列表和泄露检查、请求名额保留到工作停止 | G2、G4、G10 | 完成 | 服务端和管理页数据测试通过 |
+| P3 | 自有 Vercel 包：`own_snapshot align` / `package`、`own_index.py`、全部 36,397 个已核准片段 | A6 | 完成 | 已在本地构建并检查：约 461 MB，上限 500 MB；尚未部署 |
+| P4 | 项目负责人部署我们自己的项目：登录、创建项目、Neon、密钥、`COACH_DAILY_LIMIT=10`、`--prod` | P1–P3、G13 | 未开始 | 只能由项目负责人操作 |
+| P5 | 三语文档 | P1–P3 | 完成 | `design.md`、`frontend/README.md`、`README.md`、`translation_agent_demo/README.md` 和本文件 |
 
 ## 项目负责人判断题
 
-1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让 WSL 能打包出相同的 `/admin`？详情和建议见 `frontend/README.md` 判断题 2。
-2. **Neon 设置（项目负责人操作，阻塞 G8）：** 在 Vercel 控制台接入 Neon（G13；步骤见 `frontend/README.md`）。是否设置 `COACH_ADMIN_TOKEN`，以及已保存问题保留多久，见 `design.md` 判断题 R2 和 R3。
+1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让任何机器都能打包出相同的 `/admin`？我们自己的包用 `--admin-data` 接收预先生成的文件。详情和建议见 `frontend/README.md` 判断题 2。
+2. **Neon 和我们自己的部署（项目负责人操作，阻塞 G8 和 P4）：** 接入 Neon 并部署我们自己的 Vercel 项目（G13、P4；步骤见 `frontend/README.md`）。管理令牌和问题保留期限已经确定（`design.md` 的决定记录）。
 
-重新评估带来一个待决问题，关于提交说明和部署默认值：见 `design.md` 判断题 R1。
+`design.md` 中的待决问题：R1（D6 之后的提交说明和部署默认值）、R4（是否把出处的音频字段缩小到引用句）和 R5（快速第一阶段要做到什么程度）。
 
 后台查找期间如何处理新的教练提问，这一待决问题见 `frontend/README.md`（判断题 1）。
 
@@ -468,7 +526,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 # 3주 프로젝트 로드맵 — AI 영어 말하기 표현 Agent
 
-> **상태:** 제안된 일정. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 파일은 실행 계획만 다룹니다. 제품 범위, 시스템 동작, 기술 선택, 검수 기준, 면접 대응 범위는 `design.md`를 기준으로 합니다.
+> **상태:** 수업 제출 완료. 확장 작업은 아래에서 추적합니다(2026-11-22 갱신). 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 파일은 실행 계획만 다룹니다. 제품 범위, 시스템 동작, 기술 선택, 검수 기준, 면접 대응 범위는 `design.md`를 기준으로 합니다.
 
 ## 계획 전제
 
@@ -643,7 +701,9 @@ flowchart LR
 
 완료. 웹 화면과 설치한 Android 앱에서 질문, 자막 출처, 북마크 보존, 기록 및 오프라인 사용을 확인했다. 로컬 웹에서 실제 ExpressionCoach 답변을 받았다. 빌드 및 설치 방법은 `frontend/README.md`에 있다.
 
-Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
+팀원의 라이브 Vercel 배포는 `design.md`(학습 클라이언트)에 있다. 우리 Vercel 프로젝트는 아래 P3–P4에서 추적한다.
+
+2026-11-22에 모든 테스트가 통과했다: 코치 142, 평가 126(건너뜀 5), 프런트엔드 116(데이터베이스 테스트는 로컬 Docker Postgres에서 실행).
 
 ### 단계별 응답, 검증 슬롯 잠금, 어드민 화면(D1–D6)
 
@@ -658,7 +718,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | G5 | 실제 데이터로 어드민 디자인 완성 | G4 | 완료 | 시안 B를 `frontend/admin/`에 넣음: '모드 비교'를 포함한 탭 네 개, 한국어·중국어·영어. 로컬 서버에서 샘플 데이터로 그려짐 |
 | G6 | D6 재평가: baseline과 잠금 agent, 50과제 × 3회, 이어서 심사 | G1 | 완료 | 2026-11-22 실행 `lock-20261122`, $3.63, 결과는 `design.md` |
 | G7 | 3개 언어 문서 | G1–G5 | 완료 | `design.md`, `frontend/README.md`, `README.md`, 이 파일 |
-| G8 | 출시: 커밋, D6 데이터로 WSL에서 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄·저장된 행·모드 전환 확인 | G3, G5, G6, G9–G11, G13 | 시작 전 | 판단 질문 1과 G13이 필요 |
+| G8 | 출시: 커밋, D6 데이터로 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄·저장된 행·일일 카운트·모드 전환 확인 | G3, G5, G6, G9–G11, G13, L6, A1–A6, P1–P4 | 시작 전 | 판단 질문 1, G13, P4가 필요 |
 
 **D6 결과(2026-11-22):** 잠금은 동작했다(첫 단계 검증 예문을 잃은 요청 0건, 모두 검증된 요청 93건 전부 후속 생략). 그러나 잠금 agent는 더 이상 baseline보다 낫지 않다. 통과율은 둘 다 85.3%, strict는 54.0% 대 55.3%다(−1.6%p, 95% CI −6.2 ~ +2.3). 실제 비용은 $3.63이다. 전체 수치는 `design.md`의 재평가(D6)에 있고, 배포 기본값에 대한 질문은 그곳의 R1이다.
 
@@ -668,9 +728,9 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 | ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
 |---|---|---|---|---|
-| G9 | Postgres 요청 로그: 시작할 때 테이블 생성, 요청당 한 행, `GET /admin/requests.json` | G2 | 진행 중 | 검수: 로컬 Docker Postgres에서 서버 테스트 통과 |
-| G10 | 데이터베이스에서 모드 읽기(10초 캐시, `COACH_SYSTEM`으로 대체), `GET`/`POST /admin/mode`, 선택적 `COACH_ADMIN_TOKEN` | G9 | 진행 중 | 검수: 로컬 Docker Postgres에서 서버 테스트 통과 |
-| G11 | 어드민 화면: 실제 요청, 지금 적용 중인 모드와 전환, 한국어·중국어·영어 | G5, G9, G10 | 진행 중 | 검수: Docker Postgres에 연결한 로컬 서버에서 확인 |
+| G9 | Postgres 요청 로그: 시작할 때 테이블 생성, 요청당 한 행, `GET /admin/requests.json` | G2 | 완료 | 2026-11-22: 로컬 Docker Postgres에서 서버 테스트 통과(건너뜀 0) |
+| G10 | 데이터베이스에서 모드 읽기(10초 캐시, `COACH_SYSTEM`으로 대체), `GET`/`POST /admin/mode`, `COACH_ADMIN_TOKEN`(Vercel에서는 필수) | G9 | 완료 | 2026-11-22: 로컬 Docker Postgres에서 서버 테스트 통과(건너뜀 0) |
+| G11 | 어드민 화면: 실제 요청, 지금 적용 중인 모드와 전환, 한국어·중국어·영어 | G5, G9, G10 | 완료 | Docker Postgres에 연결한 로컬 서버에서 확인. 정리 후 화면 파일 8개, 정리 전후 화면 120개 일치 |
 | G12 | 3개 언어 문서 | G9–G11 | 완료 | `design.md`, `frontend/README.md`, 이 파일 |
 | G13 | 책임자가 Neon(무료 플랜)을 Vercel 프로젝트에 연결 | — | 시작 전 | 책임자만 가능: Hobby 플랜은 멤버를 초대할 수 없음 |
 
@@ -683,16 +743,43 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
 |---|---|---|---|---|
 | L1 | 서버: 첫 단계 병렬 검색, `quick` 줄(3초 제한, `COACH_QUICK_MODEL` / `COACH_QUICK_PROVIDER`), 로그 줄의 `quick_ms`, trace 단계의 `started_ms` | G2 | 완료 | 2026-11-22: 코치 113, 평가 126(건너뜀 5), 프런트엔드 71개 테스트 통과 |
-| L2 | 학습자 앱: `quick` 줄을 중국어와 한국어로 보여 주고 생성된 제안이라고 표시 | L1 | 진행 중 | 대기: 헤드리스 브라우저 확인 |
+| L2 | 학습자 앱: `quick` 줄을 중국어와 한국어로 보여 주고 생성된 제안이라고 표시 | L1 | 완료 | 2026-11-22: 헤드리스 브라우저 스크린샷(`first` 전 한국어 휴대폰 화면, 이후 중국어 데스크톱 화면) |
 | L3 | 3개 언어 문서 | L1 | 완료 | `design.md`, `frontend/README.md`, 이 파일 |
 | L4 | 변경 전후로 `quick`과 `first`까지의 시간 측정 | L1, L2 | 완료 | 2026-11-22, Claude Haiku 5.5, 로컬: `quick` p50 0.98초 / p95 1.41초(2초 목표 달성); `first` p50 16.1초; 병렬 검색으로 첫 단계 p50 20.0 → 16.3초 |
+| L5 | 빠른 첫 단계(PR ⑦): 후보 3개, 간결한 프롬프트와 스팬, 임베딩 호출 한 번, Claude Haiku 5.5 사고 없음; `COACH_FIRST_*` 설정, `full`로 되돌리기 | L1 | 완료 | 2026-11-22, 한국어 질문 12개, 로컬: `first` p50 14.6 → 5.2초(p95 6.0초), `quick` p50 0.99초; 한 번에 검증 예문 2.4개 대신 1.5개(`design.md` R5). 당시 테스트: 코치 129, 평가 126(건너뜀 5), 프런트엔드 87 |
+| L6 | 병렬 빠른 경로(앱 기본값): 스트리밍 후보, 후보별 검색과 선택, 0.4초 대기, trigram 인덱스(마이그레이션 014) | L5 | 완료 | 2026-11-22, 한국어 질문 12개, 로컬: `first` p50 5.2 → 4.1초(p95 4.5초), `quick` p50 0.96초. 1–2초 목표는 달성하지 못함(`design.md` R5) |
+
+### 팟캐스트 음성 구간(PR ⑥)
+
+계약, 위치, 알려진 차이는 `design.md`(팟캐스트 음성 구간)에, 설정 명령은 `frontend/README.md`에 있다. 유료 호출은 없다.
+
+| ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
+|---|---|---|---|---|
+| A1 | 음성 데이터: 마이그레이션 010, `podcast_audio backfill`, 검색 결과와 citation의 음성 필드 | — | 완료 | 대본이 있는 에피소드 1,460개 모두 음성 있음, 단위 테스트 통과 |
+| A2 | 시간 표시: 마이그레이션 013, `podcast_audio anchors`, 보간 위치 | A1 | 완료 | 검색 가능한 문서 1,167개 중 1,157개에 시간 표시, 11곳 중 10곳이 ±14초 안 |
+| A3 | 정렬 API와 로컬 ASR: `GET /api/audio/alignment`, 마이그레이션 011 캐시, faster-whisper, `frontend.audio_align` | A2 | 완료 | 단위 테스트 통과, 헤드리스 Chrome에서 음성 인식 구간 재생 |
+| A4 | 구간 플레이어: 반복, 범위, 속도, 자막, 중국어와 한국어 | A3 | 완료 | 헤드리스 브라우저 확인(한국어 휴대폰, 중국어 데스크톱) |
+| A5 | 3개 언어 문서 | A1–A4 | 완료 | `design.md`, `frontend/README.md`, 이 파일 |
+| A6 | 배포의 음성: 스냅샷 음성 필드와 번들 정렬 | A1–A3 | 진행 중 | 우리 패키지: 청크 36,050개는 시간 표시 위치, ASR 정렬 85개. 인용 청크 313개의 나머지는 정렬 중. 팀원 패키지는 WSL에서 010 적용과 백필이 필요 |
+
+### 일일 상한, 보안, 우리 Vercel 배포(2026-11-22)
+
+계약과 결정 D8–D9는 `design.md`에, 책임자 절차는 `frontend/README.md`(우리 Vercel 배포)에 있다.
+
+| ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
+|---|---|---|---|---|
+| P1 | 일일 상한: `COACH_DAILY_LIMIT` / `COACH_DAILY_TZ`, `coach_daily_usage`, 429 `daily_limit`, 503 `daily_limit_unavailable`, 헤더 두 개, 앱의 남은 횟수 | G9 | 완료 | 서버 테스트 통과(프런트엔드 116) |
+| P2 | 보안: Vercel에서 토큰 없이 모드 전환 불가, 루트 `.gitignore`, 어드민 데이터 허용 목록과 유출 검사, 작업이 멈출 때까지 요청 자리 유지 | G2, G4, G10 | 완료 | 서버와 어드민 데이터 테스트 통과 |
+| P3 | 우리 Vercel 패키지: `own_snapshot align` / `package`, `own_index.py`, 승인된 청크 36,397개 전부 | A6 | 완료 | 로컬에서 빌드하고 확인: 한도 500 MB 중 약 461 MB, 배포 안 함 |
+| P4 | 책임자가 우리 프로젝트 배포: 로그인, 프로젝트 생성, Neon, 비밀값, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | 시작 전 | 책임자만 가능 |
+| P5 | 3개 언어 문서 | P1–P3 | 완료 | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, 이 파일 |
 
 ## 프로젝트 책임자 판단 질문
 
-1. **어드민 데이터를 git에 넣을지(G8을 막음):** D6 실행으로 만든 `frontend/admin/data.json`을 커밋해 WSL에서도 같은 `/admin`을 패키징할 수 있게 할까요? 자세한 내용과 추천은 `frontend/README.md` 판단 질문 2에 있습니다.
-2. **Neon 설정(책임자 작업, G8을 막음):** Vercel 대시보드에서 Neon을 연결합니다(G13, 절차는 `frontend/README.md`). `COACH_ADMIN_TOKEN` 설정 여부와 저장된 질문의 보관 기간은 `design.md`의 판단 질문 R2, R3에 있습니다.
+1. **어드민 데이터를 git에 넣을지(G8을 막음):** D6 실행으로 만든 `frontend/admin/data.json`을 커밋해 어느 기기에서나 같은 `/admin`을 패키징할 수 있게 할까요? 우리 패키지는 미리 만든 파일을 `--admin-data`로 받습니다. 자세한 내용과 추천은 `frontend/README.md` 판단 질문 2에 있습니다.
+2. **Neon과 우리 배포(책임자 작업, G8과 P4를 막음):** Neon을 연결하고 우리 Vercel 프로젝트를 배포합니다(G13, P4, 절차는 `frontend/README.md`). 어드민 토큰과 질문 보관 기간은 정해졌습니다(`design.md`의 결정 기록).
 
-재평가로 제출 서술과 배포 기본값에 대한 질문이 하나 생겼습니다. `design.md`의 판단 질문 R1에 있습니다.
+`design.md`에 남은 질문: R1(D6 이후 제출 서술과 배포 기본값), R4(citation 음성 필드를 인용으로 좁힐지), R5(빠른 첫 단계를 어디까지 줄일지).
 
 백그라운드 검색 중 새 코치 질문을 어떻게 할지는 `frontend/README.md`의 판단 질문 1에 있습니다.
 
