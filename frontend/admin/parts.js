@@ -113,7 +113,7 @@ export function contChip(r) {
   } else if (k === "ran") {
     extra = [" · ", h("b", "+" + r.added_final)];
     tip = P("addTip", { k: r.added_final });
-    if (r.verified_first === 3) tip += P("v3Tip", { w: lockWord() });
+    if (r.verified_first === 3) tip += P("v3Tip", { w: lockWord(r) });
   } else if (k === "none") {
     tip = P(r.status === "declined" ? "declTip" : "errTip");
   }
@@ -145,7 +145,7 @@ export function slotTag(r, f) {
   if (f.added) return chip("new", "plus", P("tagAdded"));
   if (!f.verified) return chip("", "x", P("tagNoEx"));
   if (r.verified_first === 0) return chip("ok", "check", P("tagOnce"));
-  if (f.from_first) return lockApplied() ? chip("ok", "lock", P("tagLocked")) : chip("ok", "check", P("tagKept"));
+  if (f.from_first) return lockApplied(r) ? chip("ok", "lock", P("tagLocked")) : chip("ok", "check", P("tagKept"));
   return chip("ok", "check", P("tagVerified"));
 }
 export const lostTag = () => chip("warn", "alert", P("tagLost"));
@@ -249,7 +249,7 @@ export function timeBar(r, spans, { big = false, sel = null } = {}) {
     role: "img", "aria-label": P("barLabel", { t: secU(r.total_ms), f: secU(r.first_response_ms) }),
   }, spans.filter(s => s.elapsed_ms > 0).map(piece), mark);
   const tm = secU(r.first_response_ms);
-  const v3 = P(lockApplied() ? "v3Violation" : "v3Pre");
+  const v3 = P(lockApplied(r) ? "v3Violation" : "v3Pre");
   const ax = {
     imm: h("span.mk", icon("bolt"), P("mkImm", { k: r.verified_first, t: tm })),
     v3: [h("span.mk", icon("bolt"), P("mkV3", { t: tm })), h("span.gh", icon("loop"), v3)],

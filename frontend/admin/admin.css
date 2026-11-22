@@ -860,3 +860,34 @@ body[data-w=s][data-fit="0"] #ltable { max-height: max(22rem, 88vh) }
 [data-fit="0"] #gscroll { max-height: max(24rem, 85vh) }
 body[data-fit="0"] .gbody > .gdetail { max-height: calc(100vh - 1.5rem) }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important } }
+
+/* ---------- PR④: 요청 로그의 '실제 요청 / 평가 기록' 전환 ---------- */
+.srcbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin-bottom: .75rem }
+.srcbar > .rl { font-size: .75rem; font-weight: 700; color: var(--muted) }
+.live-off { max-width: 48rem }
+.live-off p { font-size: .875rem; line-height: 1.55; color: var(--ink-2) }
+.live-err { display: grid; gap: .25rem; max-width: 48rem }
+
+/* ---------- PR④: 모드 비교 탭 맨 위 '현재 모드' 카드 + 확인 대화상자 ---------- */
+.modecard { margin-bottom: 1rem; display: grid; gap: .7rem }
+.modecard > h3 { margin-bottom: 0 }
+.modecard .mc-refresh { margin-left: auto }
+.mc-src, .mc-when { font-size: .8125rem; color: var(--ink-2) }
+.mc-row { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; align-items: flex-end }
+.mc-row > .d1-now { flex: 1 1 18rem; margin: 0 }
+.mc-msg { font-size: .8125rem; min-height: 1.2em; display: flex; gap: .35rem; align-items: center }
+.mc-msg:empty { display: none }
+.mc-msg .ok { color: var(--ok); font-weight: 650 }
+.mc-msg .err { color: var(--err); font-weight: 650 }
+.mc-hist ol { display: grid; gap: .3rem }
+.mc-hist li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; font-size: .8125rem }
+.mc-dlg {
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: 1.1rem 1.2rem; max-width: min(28rem, 92vw);
+  box-shadow: var(--sh); color: var(--ink); background: var(--card); display: grid; gap: .7rem;
+}
+.mc-dlg:not([open]) { display: none }
+.mc-dlg::backdrop { background: rgb(31 24 49 / 35%) }
+.mc-dlg h3 { font-size: 1.05rem; font-weight: 800; display: flex; gap: .4rem; align-items: center }
+.mc-dlg p { font-size: .875rem; line-height: 1.5 }
+.mc-change { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center }
+.mc-actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }

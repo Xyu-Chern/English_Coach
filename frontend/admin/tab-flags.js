@@ -1,7 +1,9 @@
-/* 1. 모드 비교 — 같은 평가 실행 기록에서 baseline과 agent를 같은 기준으로 비교하는 요약 한 화면(읽기 전용). */
+/* 1. 모드 비교 — 맨 위 '현재 모드' 카드(서버 mode API, mode-card.js) + 같은 평가 실행 기록에서 baseline과 agent를
+   같은 기준으로 비교하는 요약 한 화면. */
 import { fill, fmtN, h, icon, nr, pct, secU, usd } from "./ui.js";
 import { DIST, MODES, POP, ST, lockApplied } from "./data.js";
 import { foot, hscroll, modeBadge, phead, popNote, runBar } from "./parts.js";
+import { modeCard } from "./mode-card.js";
 import { register } from "./shell.js";
 import { t, tx } from "./i18n.js";
 import "./i18n-tabs.js";
@@ -30,6 +32,7 @@ register("flags", panel => {
   A = ST.agent;
   fill(panel,
     phead(T("title"), T("lead")),
+    modeCard(), /* 서버의 현재 모드(읽기 · 바꾸기) — 아래 비교는 평가 실행 기록 */
     runBar(),
     popNote(),
     h("div.kpis", kpis(B, A)),

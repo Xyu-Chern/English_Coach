@@ -1,20 +1,29 @@
-/* 2. 요청 로그 — 평가 실행 기록(실제 요청 아님, D5). 사용자 열·필터 없음(D3). */
-import { $, $$, fill, fmtK, fmtN, h, icon, pct, sec, secU, shortId, sum, usd } from "./ui.js";
+/* 2. 요청 로그 — '실제 요청 / 평가 기록' 전환(PR④). 평가 기록 = data.json(D5), 실제 요청 = 서버 requests.json(최신순).
+   두 기록 모두 같은 표 · 필터 · 상세를 쓰고 실행 그래프로 열린다. 사용자 열·필터 없음(D3). */
+import { $, $$, fill, fmtK, fmtN, h, icon, pct, sec, secU, shortId, sum, usd, utc } from "./ui.js";
 import {
-  D, REQ, firstTok, getTraces, isNotice, lockWord, lostFirst, noEx, order, pairOf, retryTraces, spansOf, contKey,
+  D, LIVE, REQ, answersOf, firstTok, getTraces, isNotice, loadLive, lockWord, lostFirst, noEx, order, pairOf,
+  retryTraces, spansOf, contKey,
 } from "./data.js";
 import {
   CONT_TIP, STATUS, chip, contChip, dots, enT, exPlain, exText, foot, h4, hsHint, judgeText, kv, lostTag, modeBadge,
   mono, onSeg, phead, runBar, seg, slotTag, statusBadge, syncSeg, timeBar, warnErr,
 } from "./parts.js";
-import { register, updateLayout } from "./shell.js";
+import { register, rerender, updateLayout } from "./shell.js";
 import { openGraph } from "./tab-graph.js";
 import { t, tx } from "./i18n.js";
 import "./i18n-tabs.js";
+import "./i18n-live.js";
 
-/* 화면 문자열: i18n-tabs.js의 "logs.*" 키(공용 조각은 "parts.*") */
+/* 화면 문자열: i18n-tabs.js의 "logs.*" 키(공용 조각은 "parts.*"), 실제 요청은 i18n-live.js의 "live.*" */
 const T = (k, p) => t("logs." + k, p);
 const TX = (k, p) => tx("logs." + k, p);
+const LV = (k, p) => t("live." + k, p);
+/* 지금 보는 기록: "eval" | "live"(?src=live로 시작 가능). 탭을 다시 그려도 유지된다. */
+let SRC = new URLSearchParams(location.search).get("src") === "live" ? "live" : "eval";
+let focusSrc = false;
+const rowsOf = () => (SRC === "live" ? LIVE.rows : D.requests);
+const when = r => utc(r.created_at || r.started_at);
 const SEC = () => t("parts.secUnit");
 const attempt = k => t("parts.attempt", { k });
 
@@ -37,16 +46,73 @@ const taskEl = id => {
 };
 const field = (label, ...k) => h("div.field", h("span", label), ...k);
 
-register("logs", panel => {
+/* 기록 종류 전환 + (실제 요청이면) 새로고침 */
+function srcBar() {
+  const live = SRC === "live";
+  return h("div.srcbar",
+    h("span.rl", LV("srcLabel")),
+    seg("lf-src", LV("srcLabel"), [["live", LV("srcLive")], ["eval", LV("srcEval")]], v => SRC === v),
+    live && LIVE.state !== "loading" && h("button.btn.sm", { type: "button", id: "lf-reload" }, icon("loop"), LV("reload")),
+    live && LIVE.at && h("span.muted.small.num", LV("fetched", { t: utc(LIVE.at) })));
+}
+function bindSrc() {
+  onSeg($("#lf-src"), v => {
+    if (v === SRC) return;
+    SRC = v;
+    focusSrc = true;
+    rerender("logs");
+  });
+  const rb = $("#lf-reload");
+  if (rb) rb.addEventListener("click", () => {
+    focusSrc = true;
+    loadLive(true);
+    rerender("logs");
+  });
+}
+const liveHead = () =>
+  h("div.phead", h("h2", LV("title")), h("p", LV("lead")), h("span.src-chip", icon("server"), LV("srcChip")));
+const liveBar = () =>
+  h("div.runbar", h("span.rl", LV("barLabel")),
+    h("span.runpill", icon("server"), h("b", LV("rows", { n: fmtN(LIVE.rows.length) })), h("span.sub", LV("rowsSub"))),
+    h("p.runnote", icon("info"), h("span", LV("note"))));
+function afterSrc() {
+  if (!focusSrc) return;
+  focusSrc = false;
+  const b = $(`#lf-src button[data-v="${SRC}"]`);
+  if (b) b.focus();
+}
+
+register("logs", async panel => {
+  const live = SRC === "live";
+  if (live && LIVE.state !== "ok" && LIVE.state !== "off") {
+    const wantFocus = focusSrc;
+    fill(panel, liveHead(), srcBar(), h("p.loading", icon("loop"), LV("loading")));
+    bindSrc();
+    afterSrc();
+    await loadLive();
+    if (SRC !== "live") return; /* 읽는 동안 평가 기록으로 바꿨으면 그쪽 그리기에 맡긴다 */
+    focusSrc = wantFocus; /* 다 읽은 뒤 다시 그릴 때도 전환 버튼에 초점 */
+  }
+  if (live && LIVE.state !== "ok") {
+    const body = LIVE.state === "off"
+      ? h("section.card.live-off", h("h3", icon("info"), LV("offTitle")), h("p", LV("offBody")), foot(LV("offEval")))
+      : h("div.live-err", warnErr(LIVE.err, () => (focusSrc = true, rerender("logs"))), foot(LV("errHelp")));
+    fill(panel, liveHead(), srcBar(), body);
+    bindSrc();
+    afterSrc();
+    return;
+  }
+  const rows0 = rowsOf();
   L = {
     mode: "all", status: new Set(STATUSES), cont: "all", add: "all", q: "", sort: { key: "task", dir: 1 },
-    sel: REQ.has(D.examples.agent) ? D.examples.agent : (D.requests[0] || {}).id, scrolled: false, limit: PAGE,
+    sel: !live && REQ.has(D.examples.agent) ? D.examples.agent : (rows0[0] || {}).id, scrolled: false, limit: PAGE,
   };
   const contName = v => (v === "all" ? T("all") : t("parts.cont." + v));
   const contOpts = ["all", "skipped", "ran", "stop", "none"].map(v => [v, contName(v), { title: CONT_TIP[v] }]);
   fill(panel,
-    phead(T("title"), T("lead")),
-    runBar(),
+    live ? liveHead() : phead(T("title"), T("lead")),
+    srcBar(),
+    live ? liveBar() : runBar(),
     h("div.ltools", { role: "search", "aria-label": T("filters") },
       field(T("fMode"), seg("lf-mode", T("fMode"), [["all", T("all")], ["baseline", "baseline"], ["agent", "agent"]],
         v => L.mode === v)),
@@ -111,7 +177,9 @@ register("logs", panel => {
       pickRow(tr.dataset.id);
     }
   });
+  bindSrc();
   drawLog();
+  afterSrc();
 });
 
 function syncFilters() {
@@ -124,7 +192,7 @@ function logRows() {
   const q = L.q.trim().toLowerCase(), f = (ADD_FILTERS.find(x => x[0] === L.add) || ADD_FILTERS[0])[2];
   const hit = r => !q || (r.question || "").toLowerCase().includes(q) || r.task_id.toLowerCase().includes(q) ||
     r.id.toLowerCase().startsWith(q);
-  const rows = D.requests.filter(r => (L.mode === "all" || r.mode === L.mode) && L.status.has(r.status) &&
+  const rows = rowsOf().filter(r => (L.mode === "all" || r.mode === L.mode) && L.status.has(r.status) &&
     (L.cont === "all" || contKey(r) === L.cont) && f(r) && hit(r));
   /* 기본 정렬 = data.json 순서(과제 파일 순서 → 회차 → baseline 먼저) */
   const val = { first: r => r.first_response_ms, total: r => r.total_ms, tok: r => r.tokens.total,
@@ -142,10 +210,14 @@ const markRow = (tr, on) => {
 
 function logRow(r, maxT) {
   const bar = (tag, v) => h(tag, { css: { width: ((v / maxT) * 100).toFixed(1) + "%" } });
+  /* 실제 요청은 과제 · 회차 대신 시각 · 전송 방식(transport) */
+  const who = r.live
+    ? [h("span.tk", when(r)), h("span.trn.num", h("span", r.transport || ""), h("span", r.language || ""))]
+    : [h("span.tk", taskEl(r.task_id)), h("span.trn.num", h("span", attempt(r.attempt)), h("span", r.language || ""))];
   const tr = h("tr", { "data-id": r.id },
-    h("td.tcell.col-tu", h("span.tk", taskEl(r.task_id)),
-      h("span.trn.num", h("span", attempt(r.attempt)), h("span", r.language || ""))),
-    h("td.qcell", h("span.qwho.num", h("span.mono", taskEl(r.task_id)), h("span", attempt(r.attempt))),
+    h("td.tcell.col-tu", who),
+    h("td.qcell", h("span.qwho.num", r.live ? h("span.mono", when(r))
+      : [h("span.mono", taskEl(r.task_id)), h("span", attempt(r.attempt))]),
       h("span.qtext", r.question ?? T("noQuestion")),
       h("span.qsub", modeBadge(r.mode), statusBadge(r.status), contChip(r), h("span.vtxt.num", exText(r)))),
     h("td.col-ms", h("span.msst", modeBadge(r.mode), statusBadge(r.status))),
@@ -164,7 +236,8 @@ function drawLog() {
   const cnt = s => rows.filter(r => r.status === s).length, cc = v => rows.filter(r => contKey(r) === v).length;
   const legend = (cls, l) => h("span", h("span.dots3", h("i" + cls)), l);
   const b = v => h("b", fmtN(v));
-  fill($("#lcount"), h("span", TX("count", { n: b(rows.length), total: fmtN(D.requests.length) })),
+  const all = rowsOf();
+  fill($("#lcount"), h("span", TX("count", { n: b(rows.length), total: fmtN(all.length) })),
     STATUSES.map(s => h("span", statusBadge(s), " ", fmtN(cnt(s)))),
     h("span", TX("contCount", {
       skip: b(cc("skipped")), ran: b(cc("ran")), stop: b(cc("stop")), none: b(cc("none")),
@@ -176,7 +249,7 @@ function drawLog() {
   const at = rows.findIndex(r => r.id === L.sel);
   if (at < 0) L.sel = rows[0] ? rows[0].id : null;
   else if (at >= L.limit) L.limit = Math.ceil((at + 1) / PAGE) * PAGE; /* 고른 행은 항상 보이게 */
-  const shown = rows.slice(0, L.limit), maxT = Math.max(1, ...D.requests.map(r => r.total_ms));
+  const shown = rows.slice(0, L.limit), maxT = Math.max(1, ...all.map(r => r.total_ms));
   const th = (k, l, cls = "") => {
     const on = L.sort.key === k, desc = L.sort.dir < 0;
     return h("th" + cls, { "aria-sort": on ? (desc ? "descending" : "ascending") : "none" },
@@ -184,7 +257,8 @@ function drawLog() {
   };
   /* 머리글은 sticky라 표를 내리면 행이 그 뒤로 지나간다(의도된 겹침) */
   const table = h("table.log",
-    h("thead", { "data-allow-overlap": "" }, h("tr", th("task", T("thTask"), ".col-tu"), h("th", T("thInput")),
+    h("thead", { "data-allow-overlap": "" }, h("tr",
+      th("task", SRC === "live" ? LV("thTime") : T("thTask"), ".col-tu"), h("th", T("thInput")),
       h("th.col-ms", T("thModeStatus")), th("first", T("thFirst"), ".r"), th("total", T("thTotal"), ".r"),
       th("tok", T("thTok"), ".r"), th("add", T("thEx"), ".col-ms"))),
     h("tbody", shown.map(r => logRow(r, maxT))));
@@ -192,7 +266,8 @@ function drawLog() {
   const more = rows.length > shown.length && h("p.lmore",
     h("button.btn", { type: "button", id: "lmore" }, icon("plus"), T("more", { k: fmtN(next) })),
     h("span.muted.small", T("shown", { a: fmtN(shown.length), b: fmtN(rows.length) })));
-  fill($("#ltable"), rows.length ? table : h("p.empty", T("empty")), more);
+  const empty = h("p.empty", all.length ? T("empty") : LV("none"));
+  fill($("#ltable"), rows.length ? table : empty, more);
   drawLogDetail();
   updateLayout();
   if (!L.scrolled) {
@@ -235,11 +310,14 @@ function drawLogDetail() {
         r.error_code && chip("err.mono", null, r.error_code)),
       h("button.btn.primary", { type: "button", on: { click: () => openGraph(id) } },
         icon("graph"), T("openGraph"), icon("arrow"))),
-    h("p.row.meta.muted.num", icon("list"), h("span", T("evalRecord"), mono(r.task_id),
-      T("meta", {
-        a: r.attempt, cat: r.category || "—", lang: r.language || "—",
-        exp: T(r.expect === "decline" ? "expDecline" : "expAnswer"),
-      }))),
+    r.live ? h("p.row.meta.muted.num", icon("server"), h("span", LV("record"), when(r),
+      [r.transport, r.mode_source && LV("modeSrc", { s: r.mode_source }),
+        typeof r.quick_ms === "number" && LV("qMs", { t: secU(r.quick_ms) })].filter(Boolean).map(x => " · " + x)))
+      : h("p.row.meta.muted.num", icon("list"), h("span", T("evalRecord"), mono(r.task_id),
+        T("meta", {
+          a: r.attempt, cat: r.category || "—", lang: r.language || "—",
+          exp: T(r.expect === "decline" ? "expDecline" : "expAnswer"),
+        }))),
     h("p.qfull", r.question ?? T("noQuestion")),
     r.decline_note && h("p.en-block", { lang: "en" }, r.decline_note),
     kv([
@@ -248,14 +326,15 @@ function drawLogDetail() {
       [T("kTok"), fmtK(r.tokens.input), h("small", " / " + fmtK(r.tokens.output))], [T("kFirstTok"), ftok],
       [T("kCalls"), r.llm_calls, h("small", times), " · ", r.searches, h("small", times)],
       [T("kEx"), exText(r), noEx(r) ? "" : h("small", " /3")],
-      [T("kCont"), contChip(r)], [T("kCost"), usd(r.cost_usd)], [T("kJudge"), judgeText(r)],
-      r.lost_first > 0 && [T("kLost"), r.lost_first, h("small", T("pieces")), h("small.blk", lockWord())],
+      [T("kCont"), contChip(r)], [T("kCost"), usd(r.cost_usd)], !r.live && [T("kJudge"), judgeText(r)],
+      r.lost_first > 0 && [T("kLost"), r.lost_first, h("small", T("pieces")), h("small.blk", lockWord(r))],
       r.locked_noops > 0 && [T("kNoop"), r.locked_noops, h("small", T("steps"))],
     ]),
-    pairSection(r),
+    !r.live && pairSection(r),
     h("section", h4("graph", T("barHead")), tbar),
     answersMini(r));
-  getTraces().then(() => {
+  /* 실제 요청의 단계 기록은 requests.json에 같이 와서 평가 trace 파일을 기다리지 않는다 */
+  (r.live ? Promise.resolve() : getTraces()).then(() => {
     if (L.sel !== id) return;
     const sp = spansOf(id), ft = firstTok(id);
     fill(ftok, fmtK(ft), h("small", ` (${pct(ft, r.tokens.total)}%)`));
@@ -297,7 +376,7 @@ function pickPair(p) {
 }
 
 function answersMini(r) {
-  const A = D.answers[r.id];
+  const A = answersOf(r.id);
   if (!A || (!A.final.length && !A.first.length)) return null;
   return h("section", h4("mic", T("answers"), T("answersSub")), h("ol.answers-mini",
     A.final.map(f => h("li", slotTag(r, f), enT(f.expression))),

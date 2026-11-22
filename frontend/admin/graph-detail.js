@@ -1,7 +1,7 @@
 /* 실행 그래프 · 단계 상세 패널: 고른 노드(질문 · 조립/응답 · 여러 스팬 묶음 · 단계 하나)나 스윔레인 막대의 입력 요약과 출력.
    화면 문구는 i18n-graph.js의 "graph.detail.*"(gtext("detail") = 읽는 순간의 언어). 데이터 문자열은 텍스트 노드로만 넣는다. */
 import { fill, fmtN, h, icon, isObj, sec, secU, sum } from "./ui.js";
-import { D, firstVerified, lostFirst, spansOf } from "./data.js";
+import { answersOf, firstVerified, lostFirst, spansOf } from "./data.js";
 import {
   KIND, actionOf, chip, contChip, enT, exPlain, foot, hl, judgeText, kk, kv, lockChip, lockOne, lostTag, modeBadge,
   mono, slotTag, stageTitle,
@@ -86,7 +86,7 @@ function spanDetail(s, r, sp) {
 }
 
 function answersList(r) {
-  const A = D.answers[r.id];
+  const A = answersOf(r.id);
   if (!A || (!A.final.length && !A.first.length)) return foot(X.noAnswer);
   const where = f => (f.episode || f.show) &&
     h("span.muted.small", icon("mic"), " ", [f.episode, f.show].filter(Boolean).join(" · "));

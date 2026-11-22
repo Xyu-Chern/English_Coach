@@ -24,7 +24,7 @@ export const stepOf = s => (STEPS.find(([re]) => re.test(s.stage)) || [null, "ot
 /* 잠긴 슬롯 = 첫 단계에서 검증돼 이미 보낸 슬롯. baseline은 원래 검증 슬롯을 건드리지 않고(코드 규칙),
    agent는 잠금 적용 기록(meta.lock.applied = true)에서만 고정한다. 검증 1~2개 · 후속 실행일 때만 의미가 있다. */
 export function lockedSlots(r, sp) {
-  const on = (lockApplied() || r.mode === "baseline") && markKind(r) === "imm" && r.continuation === "ran";
+  const on = (lockApplied(r) || r.mode === "baseline") && markKind(r) === "imm" && r.continuation === "ran";
   return new Set(on ? firstVerified(sp) : []);
 }
 
@@ -253,7 +253,7 @@ export function prevVerify(sp, s) {
 
 /* ---------- 잠금 전 agent 기록: 먼저 보낸 슬롯(fv)과, 단계 s 전에 repick·replace로 바뀐 슬롯 ---------- */
 export function preMarks(r, sp, s) {
-  if (!s || r.mode !== "agent" || s.phase !== "continuation" || lockApplied()) return null;
+  if (!s || r.mode !== "agent" || s.phase !== "continuation" || lockApplied(r)) return null;
   const fv = firstVerified(sp);
   if (!fv.length) return null;
   const done = x => !/^(rejected|kept_verified)/.test(String((x.detail || {}).outcome ?? "rejected"));
@@ -274,13 +274,13 @@ export function firstSlotNote(r, d, fv, s) {
   const hits = r.mode === "agent" && s.phase === "continuation" && s.locked !== true &&
     ["repick", "replace"].includes(d.action) && fv.includes(d.slot);
   if (!hits) return null;
-  return h("p.lockrow", preChip(T.firstSlotHit), h("span", lockApplied() ? T.lockViolation : T.wouldNoop));
+  return h("p.lockrow", preChip(T.firstSlotHit), h("span", lockApplied(r) ? T.lockViolation : T.wouldNoop));
 }
 export function judgeLock(r, d, fv) {
   if (Array.isArray(d.locked_slots) && d.locked_slots.length) {
     return h("p.lockrow", lockChip(d.locked_slots), h("span", T.judgeLocked));
   }
-  if (r.mode !== "agent" || !fv.length || lockApplied()) return null;
+  if (r.mode !== "agent" || !fv.length || lockApplied(r)) return null;
   return h("p.lockrow", preChip(T.preLock), h("span", T.judgeUnaware(fv.map(x => "#" + x).join("·"))));
 }
 

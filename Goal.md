@@ -190,15 +190,28 @@ Scope, contracts and known gaps are in `design.md` (Learner clients). G6 made th
 | G5 | Admin design on real data | G4 | Done | Design B in `frontend/admin/`: four tabs including Mode comparison, Korean, Chinese and English; drawn from sample data on the local server |
 | G6 | D6 re-evaluation: baseline and the locked agent, 50 tasks × 3, then grading | G1 | Done | Run `lock-20261122` on 2026-11-22, $3.63; results in `design.md` |
 | G7 | Three-language documentation | G1–G5 | Done | `design.md`, `frontend/README.md`, `README.md`, this file |
-| G8 | Release: commit, package in WSL with the D6 data, rebuild the APK, deploy, then check streaming on Vercel and Android, `/admin` and the log lines | G3, G5, G6 | Not started | Needs judgment question 1 |
+| G8 | Release: commit, package in WSL with the D6 data, rebuild the APK, deploy, then check streaming on Vercel and Android, `/admin`, the log lines, the saved rows and the mode switch | G3, G5, G6, G9–G11, G13 | Not started | Needs judgment question 1 and G13 |
 
 **D6 result (2026-11-22):** the lock held (0 requests lost a first-stage verified example; all 93 fully verified requests skipped the continuation), but the locked agent no longer beats the baseline: pass 85.3% for both, strict 54.0% vs 55.3% (−1.6 pp, 95% CI −6.2 to +2.3). Actual cost $3.63. The full figures are in `design.md` (Re-evaluation (D6)), and the open question on the deployed default is R1 there.
+
+### Request log and mode switch (D5 update, 2026-11-22)
+
+Contracts and known gaps are in `design.md` (Mode and request log, Admin API). The owner's Neon setup is in `frontend/README.md`. No paid calls.
+
+| ID | Sub-goal | Depends on | Status | Latest check |
+|---|---|---|---|---|
+| G9 | Postgres request log: tables at start, one row per request, `GET /admin/requests.json` | G2 | In progress | Acceptance: server tests against the local Docker Postgres |
+| G10 | Mode from the database (10 s cache, `COACH_SYSTEM` fallback), `GET`/`POST /admin/mode`, optional `COACH_ADMIN_TOKEN` | G9 | In progress | Acceptance: server tests against the local Docker Postgres |
+| G11 | Admin page: live requests, the mode in effect and the switch, in Korean, Chinese and English | G5, G9, G10 | In progress | Acceptance: the local server with the Docker Postgres |
+| G12 | Three-language documentation | G9–G11 | Done | `design.md`, `frontend/README.md`, this file |
+| G13 | The owner attaches Neon (free plan) to the Vercel project | — | Not started | Owner only: the Hobby plan cannot invite members |
 
 The S0–S9 board above still shows the original plan. It was not updated after the course submission.
 
 ## Project Owner Judgment Questions
 
 1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that WSL can package the same `/admin`? The detail and the recommendation are in `frontend/README.md`, judgment question 2.
+2. **Neon setup (owner action, blocks G8):** attach Neon in the Vercel dashboard (G13; steps in `frontend/README.md`). Whether to set `COACH_ADMIN_TOKEN` and how long to keep saved questions are judgment questions R2 and R3 in `design.md`.
 
 The re-evaluation raised one question, on the submission wording and the deployed default: judgment question R1 in `design.md`.
 
@@ -400,15 +413,28 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | G5 | 用真实数据完成管理页设计 | G4 | 完成 | 设计稿 B 放在 `frontend/admin/`：含「模式对比」在内的四个标签页，韩文、中文、英文；在本地服务上用样例数据绘制 |
 | G6 | D6 重新评估：baseline 和加锁的 agent，50 题 × 3 次，再评分 | G1 | 完成 | 2026-11-22 运行 `lock-20261122`，3.63 美元；结果见 `design.md` |
 | G7 | 三语文档 | G1–G5 | 完成 | `design.md`、`frontend/README.md`、`README.md` 和本文件 |
-| G8 | 发布：提交，在 WSL 中用 D6 数据打包，重新构建 APK，部署，然后检查 Vercel 和 Android 上的流式传输、`/admin` 和日志行 | G3、G5、G6 | 未开始 | 需要判断题 1 |
+| G8 | 发布：提交，在 WSL 中用 D6 数据打包，重新构建 APK，部署，然后检查 Vercel 和 Android 上的流式传输、`/admin`、日志行、保存的行和模式切换 | G3、G5、G6、G9–G11、G13 | 未开始 | 需要判断题 1 和 G13 |
 
 **D6 结果（2026-11-22）：** 锁定生效（丢失第一阶段核对通过例句的请求为 0；93 个全部核对通过的请求都跳过了后续阶段），但加锁的 agent 不再优于 baseline：通过率都是 85.3%，严格通过率 54.0% 对 55.3%（−1.6 个百分点，95% 置信区间 −6.2 至 +2.3）。实际费用 3.63 美元。完整数据见 `design.md`（重新评估（D6）），关于部署默认值的待决问题是其中的 R1。
+
+### 请求日志与模式切换（D5 更新，2026-11-22）
+
+契约和已知差距见 `design.md`（模式与请求日志、管理页 API）。项目负责人的 Neon 设置见 `frontend/README.md`。没有付费调用。
+
+| 编号 | 子目标 | 依赖 | 状态 | 最近检查 |
+|---|---|---|---|---|
+| G9 | Postgres 请求日志：启动时建表，每个请求一行，`GET /admin/requests.json` | G2 | 进行中 | 验收：在本地 Docker Postgres 上通过服务端测试 |
+| G10 | 从数据库读取模式（缓存 10 秒，退回 `COACH_SYSTEM`），`GET`/`POST /admin/mode`，可选 `COACH_ADMIN_TOKEN` | G9 | 进行中 | 验收：在本地 Docker Postgres 上通过服务端测试 |
+| G11 | 管理页：线上请求、当前生效的模式和切换，韩文、中文、英文 | G5、G9、G10 | 进行中 | 验收：在接入 Docker Postgres 的本地服务上检查 |
+| G12 | 三语文档 | G9–G11 | 完成 | `design.md`、`frontend/README.md` 和本文件 |
+| G13 | 项目负责人把 Neon（免费计划）接入 Vercel 项目 | — | 未开始 | 只能由项目负责人操作：Hobby 计划不能邀请成员 |
 
 上方的 S0–S9 看板仍是原始计划，课程提交后没有更新。
 
 ## 项目负责人判断题
 
 1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让 WSL 能打包出相同的 `/admin`？详情和建议见 `frontend/README.md` 判断题 2。
+2. **Neon 设置（项目负责人操作，阻塞 G8）：** 在 Vercel 控制台接入 Neon（G13；步骤见 `frontend/README.md`）。是否设置 `COACH_ADMIN_TOKEN`，以及已保存问题保留多久，见 `design.md` 判断题 R2 和 R3。
 
 重新评估带来一个待决问题，关于提交说明和部署默认值：见 `design.md` 判断题 R1。
 
@@ -610,15 +636,28 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | G5 | 실제 데이터로 어드민 디자인 완성 | G4 | 완료 | 시안 B를 `frontend/admin/`에 넣음: '모드 비교'를 포함한 탭 네 개, 한국어·중국어·영어. 로컬 서버에서 샘플 데이터로 그려짐 |
 | G6 | D6 재평가: baseline과 잠금 agent, 50과제 × 3회, 이어서 심사 | G1 | 완료 | 2026-11-22 실행 `lock-20261122`, $3.63, 결과는 `design.md` |
 | G7 | 3개 언어 문서 | G1–G5 | 완료 | `design.md`, `frontend/README.md`, `README.md`, 이 파일 |
-| G8 | 출시: 커밋, D6 데이터로 WSL에서 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄 확인 | G3, G5, G6 | 시작 전 | 판단 질문 1이 필요 |
+| G8 | 출시: 커밋, D6 데이터로 WSL에서 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄·저장된 행·모드 전환 확인 | G3, G5, G6, G9–G11, G13 | 시작 전 | 판단 질문 1과 G13이 필요 |
 
 **D6 결과(2026-11-22):** 잠금은 동작했다(첫 단계 검증 예문을 잃은 요청 0건, 모두 검증된 요청 93건 전부 후속 생략). 그러나 잠금 agent는 더 이상 baseline보다 낫지 않다. 통과율은 둘 다 85.3%, strict는 54.0% 대 55.3%다(−1.6%p, 95% CI −6.2 ~ +2.3). 실제 비용은 $3.63이다. 전체 수치는 `design.md`의 재평가(D6)에 있고, 배포 기본값에 대한 질문은 그곳의 R1이다.
+
+### 요청 로그와 모드 전환(D5 갱신, 2026-11-22)
+
+계약과 알려진 차이는 `design.md`(모드와 요청 로그, 어드민 API)에 있다. 책임자의 Neon 설정은 `frontend/README.md`에 있다. 유료 호출은 없다.
+
+| ID | 하위 목표 | 의존 항목 | 상태 | 최근 확인 |
+|---|---|---|---|---|
+| G9 | Postgres 요청 로그: 시작할 때 테이블 생성, 요청당 한 행, `GET /admin/requests.json` | G2 | 진행 중 | 검수: 로컬 Docker Postgres에서 서버 테스트 통과 |
+| G10 | 데이터베이스에서 모드 읽기(10초 캐시, `COACH_SYSTEM`으로 대체), `GET`/`POST /admin/mode`, 선택적 `COACH_ADMIN_TOKEN` | G9 | 진행 중 | 검수: 로컬 Docker Postgres에서 서버 테스트 통과 |
+| G11 | 어드민 화면: 실제 요청, 지금 적용 중인 모드와 전환, 한국어·중국어·영어 | G5, G9, G10 | 진행 중 | 검수: Docker Postgres에 연결한 로컬 서버에서 확인 |
+| G12 | 3개 언어 문서 | G9–G11 | 완료 | `design.md`, `frontend/README.md`, 이 파일 |
+| G13 | 책임자가 Neon(무료 플랜)을 Vercel 프로젝트에 연결 | — | 시작 전 | 책임자만 가능: Hobby 플랜은 멤버를 초대할 수 없음 |
 
 위 S0–S9 현황판은 원래 계획 그대로다. 수업 제출 뒤에는 갱신하지 않았다.
 
 ## 프로젝트 책임자 판단 질문
 
 1. **어드민 데이터를 git에 넣을지(G8을 막음):** D6 실행으로 만든 `frontend/admin/data.json`을 커밋해 WSL에서도 같은 `/admin`을 패키징할 수 있게 할까요? 자세한 내용과 추천은 `frontend/README.md` 판단 질문 2에 있습니다.
+2. **Neon 설정(책임자 작업, G8을 막음):** Vercel 대시보드에서 Neon을 연결합니다(G13, 절차는 `frontend/README.md`). `COACH_ADMIN_TOKEN` 설정 여부와 저장된 질문의 보관 기간은 `design.md`의 판단 질문 R2, R3에 있습니다.
 
 재평가로 제출 서술과 배포 기본값에 대한 질문이 하나 생겼습니다. `design.md`의 판단 질문 R1에 있습니다.
 

@@ -880,6 +880,100 @@ def build(run_dir: Path, tasks_path: Path, *, mode: tuple[str, str] = (DEFAULT_M
     return AdminData.model_validate(payload).model_dump(mode="json")
 
 
+# ---------- live requests (frontend/request_log.py rows, for GET /admin/requests.json) ----------
+
+LIVE_STATUS = {"ok": "ok", "declined": "declined"}  # everything else (timeout, busy, disconnected...) is an error
+LIVE_CONTINUATION = {"ran": "ran", "skipped": "skipped", "off": "skipped"}  # off: nothing ran after the first stage
+
+
+class LiveRequest(Request):
+    """A live request: data.json's request shape plus what only the server's log row has (the admin page
+    shows them in the live list and detail)."""
+    transport: Literal["json", "ndjson"] | None
+    mode_source: Literal["db", "env"] | None
+    quick_ms: int | None
+
+
+def live_language(text: str | None) -> str | None:
+    """ko (Hangul), zh (CJK) or en (Latin letters) by the first such character; None without one."""
+    for ch in text or "":
+        if "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ" or "㄰" <= ch <= "㆏":
+            return "ko"
+        if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿":
+            return "zh"
+        if ch.isascii() and ch.isalpha():
+            return "en"
+    return None
+
+
+def live_request(row: dict) -> tuple[dict, list[dict], dict]:
+    """(request, spans, answer) for one coach_request_log row, in data.json's shapes (validated; the request
+    adds the row's transport, mode_source and quick_ms, LiveRequest).
+
+    Times, counts and tokens are the server's measures (first_response_ms = the stream's first_ms, else
+    total_ms); the trace, answers, lost_first and locked_noops come from the stored RunResult, as for an
+    evaluation attempt. Not graded: passed, strict_passed, grounded_good and cost_usd are null."""
+    from datetime import timedelta
+    rid = f"live-{row['id']}"
+    mode = row.get("mode") if row.get("mode") in MODES else DEFAULT_MODE
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    f = attempt_facts({"result": result})
+    status = LIVE_STATUS.get(row.get("status"), "error")
+    continuation = LIVE_CONTINUATION.get(row.get("continuation"), "none")
+    total = ms(row.get("total_ms"))
+    first_response = min(total, ms(row["first_ms"])) if row.get("first_ms") is not None else total
+    created = row.get("created_at")
+    if isinstance(created, str):
+        created = datetime.fromisoformat(created)
+    recorded_at = created.astimezone(timezone.utc).isoformat(timespec="milliseconds") if created else None
+    started_at = ((created - timedelta(milliseconds=total)).astimezone(timezone.utc).isoformat(timespec="milliseconds")
+                  if created else None)
+    tin, tout = int(row.get("input_tokens") or 0), int(row.get("output_tokens") or 0)
+    question = row.get("question")
+    request = {
+        "id": rid, "key": f"live/{mode}/{row['id']}", "task_id": rid, "attempt": 1, "category": None,
+        "language": live_language(question), "expect": None, "question": question, "mode": mode, "system": mode,
+        "status": status,
+        "error_code": (row.get("error_code") or row.get("status") or "error") if status == "error" else None,
+        "error_phase": (("continuation" if continuation == "ran" or (row.get("verified_first") or 0) > 0 else "first")
+                        if status == "error" else None),
+        "decline_note": (f["decline_note"] or result.get("source_availability_note")) if status == "declined" else None,
+        "started_at": started_at, "recorded_at": recorded_at,
+        "first_stage_ms": f["first_stage_ms"], "first_response_ms": first_response, "total_ms": total,
+        "background_ms": max(0, total - first_response),
+        "tokens": {"input": tin, "output": tout, "total": tin + tout},
+        "llm_calls": int(row.get("llm_calls") or 0), "searches": int(row.get("searches") or 0),
+        "verified_first": row.get("verified_first"),
+        "verified_final": row.get("verified_final") if status == "ok" else None,
+        "added_final": int(row.get("added_final") or 0), "lost_first": f["lost_first"],
+        "continuation": continuation, "locked_noops": f["locked_noops"],
+        "passed": None, "strict_passed": None, "grounded_good": None, "cost_usd": None,
+        "transport": row.get("transport") if row.get("transport") in ("json", "ndjson") else None,
+        "mode_source": row.get("mode_source") if row.get("mode_source") in ("db", "env") else None,
+        "quick_ms": row["quick_ms"] if isinstance(row.get("quick_ms"), int) else None,
+    }
+    spans = convert_trace(f["trace"], f["n_first"], rich=False,
+                          locked_slots=f["locked_slots"] if mode == "agent" else None)
+    answer = {"first": f["first_items"], "final": f["final_items"]}
+    return (LiveRequest.model_validate(request).model_dump(mode="json"),
+            [Span.model_validate(s).model_dump(mode="json") for s in spans],
+            Answer.model_validate(answer).model_dump(mode="json"))
+
+
+def live_payload(rows: list[dict]) -> dict:
+    """{"requests", "traces", "answers"} for rows in their order (newest first); a row that cannot be
+    converted is left out rather than failing the page."""
+    requests, traces, answers = [], {}, {}
+    for row in rows:
+        try:
+            request, spans, answer = live_request(row)
+        except Exception:
+            continue
+        requests.append(request)
+        traces[request["id"]], answers[request["id"]] = spans, answer
+    return {"requests": requests, "traces": traces, "answers": answers}
+
+
 # ---------- writing ----------
 
 def dumps(value) -> str:

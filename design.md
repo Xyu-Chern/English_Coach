@@ -170,7 +170,7 @@ The live Vercel app serves the chat UI, Android download and coach at the same H
 
 #### Owner decisions D1–D6
 
-Agreed on 2026-11-21. The sections below implement D1–D5 and prepare D6.
+Agreed on 2026-11-21. D5 was updated on 2026-11-22 (a Neon database for the request log and the mode). The sections below implement D1–D5 and prepare D6.
 
 | ID | Decision |
 |---|---|
@@ -178,7 +178,7 @@ Agreed on 2026-11-21. The sections below implement D1–D5 and prepare D6.
 | D2 | A school project: questions may be shown and kept as written. |
 | D3 | No user identity. Data is per request. |
 | D4 | `/admin` ships in the same Vercel deployment, without protection. |
-| D5 | No production store. The mode is an environment variable and a redeploy. The admin data is an evaluation run bundled with the deployment. Live requests are not stored; each prints one log line. A learner who leaves cannot fetch the rest later. |
+| D5 | Updated 2026-11-22: a free Neon Postgres database, attached to the Vercel project by the owner, holds the request log and the mode. Each request is saved as one row with the question as written (D2). `/admin` shows these requests and switches the mode without a redeploy; the database setting wins over `COACH_SYSTEM`. Without a database, both are off and the mode is `COACH_SYSTEM`. The evaluation run stays bundled as the comparison data. A learner who leaves still cannot fetch the rest later. (Before: no production store; the mode was an environment variable and a redeploy.) |
 | D6 | After the lock, re-run the baseline and the locked agent locally with the real API (50 tasks × 3, then grading, about $6). That run becomes the admin data. |
 
 #### Verified examples first (D1)
@@ -207,10 +207,11 @@ The request is `{question, context}`. The default reply is one JSON object, `{ex
 
 #### Mode and request log (D5)
 
-- `COACH_SYSTEM` is `agent` (the default, the locked agent) or `baseline`. `COACH_CONTINUATION` is `on` (the default) or `off` (first stage only, not evaluated). The server reads both once at start and refuses to start on any other value, so a change needs a new deployment. The admin page cannot change the mode.
-- Each request that passes the access checks prints one JSON line to stdout: `event` (`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`.
-- `question_head` is the first 40 characters of the question (D2). The context and the answer are not logged. Time to the first answer is `first_ms`, or `total_ms` when it is `null`.
-- Retention is Vercel's runtime-log retention: 1 hour on Hobby, 1 day on Pro. Nothing else about a request is stored. Field meanings are in `frontend/README.md`.
+- **Database:** `COACH_LOG_DATABASE_URL`, else `DATABASE_URL`, else `POSTGRES_URL`. Without one, the request log and the mode switch are off. At start the server creates its tables (`CREATE TABLE IF NOT EXISTS`); the same SQL is in `frontend/sql/request_log.sql`. Locally the `.env` `DATABASE_URL` (Docker Postgres) is used with no extra step. On Vercel the owner attaches Neon (steps in `frontend/README.md`).
+- **Mode:** `COACH_SYSTEM` is `agent` (the default, the locked agent) or `baseline`. The mode in effect is `coach_settings.coach_system` in the database, else `COACH_SYSTEM`, else `agent`. It is cached for 10 s, and a database error falls back to `COACH_SYSTEM`. Each switch is added to `coach_mode_changes`. `COACH_CONTINUATION` is `on` (the default) or `off` (first stage only, not evaluated) and is still read once at start. Any other value of either variable stops the start.
+- **Stdout line:** each request that passes the access checks still prints one JSON line: `event` (`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head` (the first 40 characters). Vercel keeps it 1 hour on Hobby, 1 day on Pro.
+- **Saved row:** with a database the same request is also one `coach_request_log` row: mode and its source (`db` or `env`), transport, status, error code, the whole question, `quick_ms`, `first_ms`, `total_ms`, model calls, searches, tokens, verified counts, continuation, and `result` (the answer's expressions and trace, for the admin page). Time to the first answer is `first_ms`, or `total_ms` when it is `null`. Field meanings are in `frontend/README.md`.
+- **Public data (D2, D4):** the question is stored as written and `/admin` is open, so anyone with the address can read every saved question. Rows stay until the owner deletes them (judgment question R3).
 
 #### Verified-slot lock and evaluation reproducibility
 
@@ -235,11 +236,21 @@ In the submission run's 129 normal answers, the first stage verified all three s
 
 #### Admin page (D4, D5)
 
-`/admin/` is a read-only page in the same deployment, with no protection: anyone with the address can see it, and the page says so. It reads `data.json` (contract version 1), which `frontend/admin_data.py` builds from one evaluation run. The file holds the evaluation questions as written (D2) and no learner requests. Its lock verdict (`meta.lock`) comes from the traces, so the submission run shows as recorded before the lock.
+`/admin/` is a page in the same deployment, with no protection for viewing: anyone with the address can see it, and the page says so. It reads `data.json` (contract version 1), which `frontend/admin_data.py` builds from one evaluation run. That file holds the evaluation questions as written (D2). Its lock verdict (`meta.lock`) comes from the traces, so the submission run shows as recorded before the lock. With a database, the page also shows the saved live requests and the mode in effect, and can switch the mode (Admin API below).
 
 - **Design:** of the five designs compared on the same data, B (the learner app's brand colours with rounded cards) ships in `frontend/admin/`. Its four tabs are **Mode comparison** (`baseline` and `agent` from the same run on the same measures), **Request log**, **Metrics** (p50 · p95 · p99) and **Run graph** (one request as a route map, a swimlane timeline and a step detail).
 - **Languages:** the header switches the page between Korean, Chinese and English; `?lang=` picks one for a link. Korean is the default.
 - **Serving:** Vercel serves the page and its data as static files under `public/admin/`. Because the page reads its data by relative URL, `/admin` redirects to `/admin/`. The local server serves the same paths. `COACH_ADMIN_DIR` and `COACH_ADMIN_DATA` swap the page and data folders, so another design or run can be checked on its own port. Commands and packaging options are in `frontend/README.md`.
+
+#### Admin API (D4, D5)
+
+| Request | Reply |
+|---|---|
+| `GET /admin/requests.json?limit=300` | `{"schema_version": 1, "source": "live", "enabled", "requests", "traces", "answers"}`, newest first. `requests` has the same shape as in `data.json`, plus the log row's `transport`, `mode_source` and `quick_ms`; `traces` maps an id to its spans and `answers` an id to its answer. `enabled: false` means no database |
+| `GET /admin/mode` | `{"mode", "source": "db" or "env", "updated_at", "writable", "token_required", "history": [{"at", "from", "to"}]}`. `writable` is `false` without a database |
+| `POST /admin/mode` with `{"mode": "baseline" or "agent"}` | 200 with the `GET` shape; 400 `invalid_mode`; 401 `token_required`; 409 `no_database` |
+
+- `COACH_ADMIN_TOKEN` is optional. When it is set, `POST /admin/mode` needs the header `X-Admin-Token` with that value, compared with `hmac.compare_digest`. Viewing stays open (D4). When it is not set, anyone with the address can switch the mode for every learner (judgment question R2).
 
 #### Known gaps
 
@@ -247,13 +258,21 @@ In the submission run's 129 normal answers, the first stage verified all three s
 - Installed APKs keep the JSON flow, so they show no early results until the APK is rebuilt.
 - The deadline stops work between calls. A model call already running is not cut.
 - The deployable package is built in WSL only: the corpus export uses `sudo -u postgres psql`, and the MiniLM snapshot is not in the macOS Docker database.
-- The admin page shows the mode set at packaging time. Changing `COACH_SYSTEM` without repackaging leaves it stale.
+- The request log and the mode switch are checked locally only, against the Docker Postgres. Neon on Vercel is not attached yet: the injected variable name, the saved rows and the switch on a real deployment are unchecked.
+- A mode switch can take up to 10 s to reach every running instance (the cache). Saved rows have no automatic expiry.
+- The evaluation data's "mode the data was built for" is still set at packaging time; the mode in effect comes from `GET /admin/mode`.
 - The admin page's JavaScript has no automated test; server tests cover how it is served and its source rules.
 - The app's default agent is the locked agent that D6 measured: equal to the baseline on pass, not better as the pre-lock submission agent was (judgment question R1).
 
 ## 11. Project Owner Judgment Questions
 
 **R1. Submission wording and deployed default after D6:** keep the locked agent as the default and write "same accuracy as the baseline, plus kept examples and skipped continuations"? Recommended: yes, because the lock keeps the D1 promise and the strict gap is not significant. Alternatives: switch the default to the baseline (cheaper, same results), or cite only the submission results and attach the D6 run as an appendix.
+
+**R2. Admin token on Vercel:** set `COACH_ADMIN_TOKEN`? Without it, anyone who opens `/admin` can switch the live mode for every learner. Recommended: yes; viewing stays open (D4), and only the switch needs the token.
+
+**R3. How long to keep saved questions:** rows in Neon stay until deleted. Recommended: keep them until grading ends, then delete the rows or the Neon project. Alternative: keep them as portfolio evidence, knowing every question stays public on `/admin`.
+
+**Owner action (not a question):** attach Neon in the Vercel dashboard (steps in `frontend/README.md`). Until then the deployment keeps only the stdout line, and `/admin` cannot switch the mode.
 
 Nothing else is pending in this document. The open questions on a coach question during a background search and on committing the admin data are in `frontend/README.md` (judgment questions 1 and 2). The admin design is settled: B.
 
@@ -433,7 +452,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 #### 项目负责人决定 D1–D6
 
-2026-11-21 确定。下文实现 D1–D5，并为 D6 做好准备。
+2026-11-21 确定。D5 于 2026-11-22 更新（用 Neon 数据库保存请求日志和模式）。下文实现 D1–D5，并为 D6 做好准备。
 
 | 编号 | 决定 |
 |---|---|
@@ -441,7 +460,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | D2 | 这是学校项目：问题可以原样显示和保存。 |
 | D3 | 不区分用户，数据只按请求计。 |
 | D4 | `/admin` 放在同一个 Vercel 部署中，不设保护。 |
-| D5 | 不增加运行时存储。模式通过环境变量加重新部署切换。管理页数据是随部署打包的一次评估运行。线上请求不保存，每个请求只打印一行日志。学习者离开后，无法再从服务端取回剩余结果。 |
+| D5 | 2026-11-22 更新：由项目负责人接入 Vercel 项目的免费 Neon Postgres 数据库保存请求日志和模式。每个请求保存为一行，问题原样保存（D2）。`/admin` 显示这些请求，并且无需重新部署即可切换模式；数据库中的设置优先于 `COACH_SYSTEM`。没有数据库时两者都关闭，模式取 `COACH_SYSTEM`。评估运行仍随部署打包，作为对比数据。学习者离开后，仍无法从服务端取回剩余结果。（此前：不增加运行时存储，模式通过环境变量加重新部署切换。） |
 | D6 | 加锁后，在本地用真实 API 重新评估 baseline 和加锁的 agent（50 题 × 3 次，再评分，约 6 美元）。这次运行将成为管理页数据。 |
 
 #### 先发送已核对的结果（D1）
@@ -470,10 +489,11 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 #### 模式与请求日志（D5）
 
-- `COACH_SYSTEM` 为 `agent`（默认，加锁的 agent）或 `baseline`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`（只运行第一阶段，未经评估）。服务启动时读取一次，遇到其他值会拒绝启动，因此修改后需要重新部署。管理页不能切换模式。
-- 每个通过访问检查的请求都向 stdout 打印一行 JSON：`event`（`coach_request`）、`ts`、`request_id`、`mode`、`continuation_setting`、`transport`、`status`、`error_code`、`verified_first`、`added_final`、`verified_final`、`continuation`、`invariant_ok`、`first_ms`、`total_ms`、`llm_calls`、`searches`、`input_tokens`、`output_tokens`、`cached_input_tokens`、`disconnected`、`question_head`。
-- `question_head` 是问题的前 40 个字符（D2）。不记录场景和答案。首次看到答案的时间是 `first_ms`，为 `null` 时是 `total_ms`。
-- 保留期限就是 Vercel 运行日志的保留期限：Hobby 计划 1 小时，Pro 计划 1 天。请求的其他内容都不保存。字段含义见 `frontend/README.md`。
+- **数据库：** 依次使用 `COACH_LOG_DATABASE_URL`、`DATABASE_URL`、`POSTGRES_URL`。都没有时，请求日志和模式切换关闭。服务启动时创建所需的表（`CREATE TABLE IF NOT EXISTS`），相同的 SQL 也放在 `frontend/sql/request_log.sql`。本地自动使用 `.env` 中的 `DATABASE_URL`（Docker Postgres），无需额外步骤。在 Vercel 上由项目负责人接入 Neon（步骤见 `frontend/README.md`）。
+- **模式：** `COACH_SYSTEM` 为 `agent`（默认，加锁的 agent）或 `baseline`。实际生效的模式依次取数据库中的 `coach_settings.coach_system`、`COACH_SYSTEM`、`agent`。结果缓存 10 秒，数据库出错时退回 `COACH_SYSTEM`。每次切换都记入 `coach_mode_changes`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`（只运行第一阶段，未经评估），仍只在启动时读取一次。两个变量出现其他值时都会拒绝启动。
+- **stdout 日志行：** 每个通过访问检查的请求仍打印一行 JSON：`event`（`coach_request`）、`ts`、`request_id`、`mode`、`continuation_setting`、`transport`、`status`、`error_code`、`verified_first`、`added_final`、`verified_final`、`continuation`、`invariant_ok`、`first_ms`、`total_ms`、`llm_calls`、`searches`、`input_tokens`、`output_tokens`、`cached_input_tokens`、`disconnected`、`question_head`（前 40 个字符）。Vercel 保留这些日志的时间为 Hobby 1 小时、Pro 1 天。
+- **保存的行：** 有数据库时，同一请求还会保存为 `coach_request_log` 中的一行：模式及其来源（`db` 或 `env`）、传输方式、状态、错误码、完整问题、`quick_ms`、`first_ms`、`total_ms`、模型调用数、检索数、token、核对数、后续阶段，以及 `result`（供管理页使用的答案表达和 trace）。首次看到答案的时间是 `first_ms`，为 `null` 时是 `total_ms`。字段含义见 `frontend/README.md`。
+- **公开数据（D2、D4）：** 问题原样保存，`/admin` 不设保护，因此知道网址的人都能读到所有已保存的问题。这些行会一直保留，直到项目负责人删除（判断题 R3）。
 
 #### 核对位置锁定与评估可重现性
 
@@ -498,11 +518,21 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 #### 管理页（D4、D5）
 
-`/admin/` 是同一部署中的只读页面，不设保护：知道网址的人都能查看，页面上也会说明这一点。它读取 `data.json`（契约版本 1），该文件由 `frontend/admin_data.py` 根据一次评估运行生成。文件原样包含评估问题（D2），不含学习者请求。锁定结论（`meta.lock`）来自 trace，因此提交运行显示为加锁前的记录。
+`/admin/` 是同一部署中的页面，查看不设保护：知道网址的人都能查看，页面上也会说明这一点。它读取 `data.json`（契约版本 1），该文件由 `frontend/admin_data.py` 根据一次评估运行生成，原样包含评估问题（D2）。锁定结论（`meta.lock`）来自 trace，因此提交运行显示为加锁前的记录。有数据库时，页面还会显示已保存的线上请求和当前生效的模式，并可切换模式（见下方管理页 API）。
 
 - **设计：** 在同一份数据上比较的五个设计稿中，选定 B（沿用学习端品牌色和圆角卡片），放在 `frontend/admin/`。四个标签页是 **模式对比**（同一次运行中的 `baseline` 和 `agent` 按相同指标比较）、**请求日志**、**指标**（p50 · p95 · p99）和 **执行图**（单个请求的路线图、泳道时间轴和步骤详情）。
 - **语言：** 页头可在韩文、中文和英文之间切换；`?lang=` 可为链接指定语言。默认是韩文。
 - **提供方式：** Vercel 把页面和数据作为 `public/admin/` 下的静态文件提供。页面按相对路径读取数据，所以 `/admin` 会重定向到 `/admin/`。本地服务提供相同路径。`COACH_ADMIN_DIR` 和 `COACH_ADMIN_DATA` 可替换页面和数据文件夹，因此其他设计稿或运行也能在各自端口上检查。命令和打包选项见 `frontend/README.md`。
+
+#### 管理页 API（D4、D5）
+
+| 请求 | 回复 |
+|---|---|
+| `GET /admin/requests.json?limit=300` | `{"schema_version": 1, "source": "live", "enabled", "requests", "traces", "answers"}`，最新的在前。`requests` 与 `data.json` 中的形状相同，另加日志行的 `transport`、`mode_source` 和 `quick_ms`；`traces` 按 id 给出 span，`answers` 按 id 给出答案。`enabled: false` 表示没有数据库 |
+| `GET /admin/mode` | `{"mode", "source": "db" 或 "env", "updated_at", "writable", "token_required", "history": [{"at", "from", "to"}]}`。没有数据库时 `writable` 为 `false` |
+| `POST /admin/mode`，请求体 `{"mode": "baseline" 或 "agent"}` | 200，形状同 `GET`；400 `invalid_mode`；401 `token_required`；409 `no_database` |
+
+- `COACH_ADMIN_TOKEN` 是可选的。设置后，`POST /admin/mode` 需要带上值相同的 `X-Admin-Token` 请求头，用 `hmac.compare_digest` 比较。查看仍然公开（D4）。不设置时，知道网址的人都能为所有学习者切换模式（判断题 R2）。
 
 #### 已知差距
 
@@ -510,13 +540,21 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - 已安装的 APK 仍使用 JSON 流程，重新构建 APK 之前不会提前显示结果。
 - 截止时间只在两次调用之间停止工作，已经开始的模型调用不会被中断。
 - 可部署的包只能在 WSL 中生成：语料导出使用 `sudo -u postgres psql`，MiniLM 快照不在 macOS 的 Docker 数据库中。
-- 管理页显示的是打包时设定的模式。修改 `COACH_SYSTEM` 而不重新打包，页面上的模式就会过时。
+- 请求日志和模式切换只在本地用 Docker Postgres 检查。Vercel 上尚未接入 Neon：注入的变量名、保存的行以及真实部署上的切换都还没有检查。
+- 模式切换最多需要 10 秒（缓存）才能到达所有运行中的实例。保存的行没有自动过期。
+- 评估数据中的“数据对应的模式”仍在打包时确定；当前生效的模式来自 `GET /admin/mode`。
 - 管理页的 JavaScript 没有自动化测试；服务端测试覆盖页面的提供方式和源码规则。
 - 应用默认的 agent 是 D6 评估过的加锁 agent：通过率与 baseline 相同，不像加锁前的提交 agent 那样更好（判断题 R1）。
 
 ## 11. 项目负责人判断题
 
 **R1. D6 之后的提交说明和部署默认值：** 是否保留加锁的 agent 作为默认，并写明“准确率与 baseline 相同，另外能保留已发送的例句并跳过后续阶段”？建议：是，因为锁定兑现了 D1 的承诺，严格通过率的差距不显著。其他选项：把默认改为 baseline（更便宜，结果相同），或只引用提交结果，把 D6 运行作为附录。
+
+**R2. Vercel 上的管理令牌：** 是否设置 `COACH_ADMIN_TOKEN`？不设置时，任何打开 `/admin` 的人都能为所有学习者切换线上模式。建议：设置；查看仍然公开（D4），只有切换需要令牌。
+
+**R3. 已保存问题的保留期限：** Neon 中的行会一直保留，直到被删除。建议：保留到评分结束，然后删除这些行或整个 Neon 项目。其他选项：作为作品集证据保留，但要接受所有问题都会在 `/admin` 上持续公开。
+
+**项目负责人操作（不是判断题）：** 在 Vercel 控制台接入 Neon（步骤见 `frontend/README.md`）。在此之前，部署只保留 stdout 日志行，`/admin` 也不能切换模式。
 
 本文件没有其他待决定的事项。后台查找期间如何处理新的教练提问，以及是否提交管理页数据，这两个待决问题见 `frontend/README.md`（判断题 1 和 2）。管理页设计已确定：B。
 
@@ -696,7 +734,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 #### 책임자 결정 D1–D6
 
-2026-11-21에 확정했다. 아래 절들은 D1–D5를 구현하고 D6을 준비한다.
+2026-11-21에 확정했다. D5는 2026-11-22에 갱신했다(요청 로그와 모드를 Neon 데이터베이스에 둔다). 아래 절들은 D1–D5를 구현하고 D6을 준비한다.
 
 | ID | 결정 |
 |---|---|
@@ -704,7 +742,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | D2 | 학교 프로젝트이므로 질문을 원문 그대로 보여 주고 보관해도 된다. |
 | D3 | 사용자를 구분하지 않는다. 데이터는 요청 단위다. |
 | D4 | `/admin`은 같은 Vercel 배포에 보호 없이 들어간다. |
-| D5 | 운영 저장소를 두지 않는다. 모드는 환경변수와 재배포로 바꾼다. 어드민 데이터는 배포에 함께 묶인 평가 실행 하나다. 실제 요청은 저장하지 않고 요청마다 로그 한 줄만 남긴다. 학습자가 화면을 떠나면 남은 결과를 서버에서 다시 받을 수 없다. |
+| D5 | 2026-11-22 갱신: 책임자가 Vercel 프로젝트에 연결한 무료 Neon Postgres 데이터베이스에 요청 로그와 모드를 둔다. 요청마다 한 행을 저장하며 질문은 원문 그대로다(D2). `/admin`은 이 요청들을 보여 주고 재배포 없이 모드를 바꾼다. 데이터베이스 설정이 `COACH_SYSTEM`보다 우선한다. 데이터베이스가 없으면 둘 다 꺼지고 모드는 `COACH_SYSTEM`이다. 평가 실행은 비교 데이터로 계속 배포에 묶는다. 학습자가 화면을 떠나면 여전히 남은 결과를 서버에서 다시 받을 수 없다. (이전: 운영 저장소 없음, 모드는 환경변수와 재배포.) |
 | D6 | 잠금을 구현한 뒤 로컬에서 실제 API로 baseline과 잠금 agent를 다시 평가한다(50과제 × 3회, 이어서 심사, 약 $6). 그 실행이 어드민 데이터가 된다. |
 
 #### 검증된 결과 먼저 보내기(D1)
@@ -733,10 +771,11 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 #### 모드와 요청 로그(D5)
 
-- `COACH_SYSTEM`은 `agent`(기본값, 잠금 agent) 또는 `baseline`이다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`(첫 단계만 실행, 평가되지 않음)다. 서버는 시작할 때 두 값을 한 번 읽고, 다른 값이면 시작하지 않는다. 그래서 바꾸려면 다시 배포해야 한다. 어드민 화면은 모드를 바꿀 수 없다.
-- 접근 검사를 통과한 요청마다 stdout에 JSON 한 줄을 출력한다: `event`(`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`.
-- `question_head`는 질문의 앞 40자다(D2). 맥락과 답은 남기지 않는다. 첫 답을 보는 시간은 `first_ms`이고, `null`이면 `total_ms`다.
-- 보존 기간은 Vercel 런타임 로그의 보존 기간(Hobby 1시간, Pro 1일)이다. 그 밖의 요청 내용은 저장하지 않는다. 필드의 뜻은 `frontend/README.md`에 있다.
+- **데이터베이스:** `COACH_LOG_DATABASE_URL`, 없으면 `DATABASE_URL`, 없으면 `POSTGRES_URL`을 쓴다. 셋 다 없으면 요청 로그와 모드 전환이 꺼진다. 서버는 시작할 때 테이블을 만든다(`CREATE TABLE IF NOT EXISTS`). 같은 SQL이 `frontend/sql/request_log.sql`에도 있다. 로컬에서는 `.env`의 `DATABASE_URL`(Docker Postgres)을 추가 작업 없이 쓴다. Vercel에서는 책임자가 Neon을 연결한다(절차는 `frontend/README.md`).
+- **모드:** `COACH_SYSTEM`은 `agent`(기본값, 잠금 agent) 또는 `baseline`이다. 실제 모드는 데이터베이스의 `coach_settings.coach_system`, 없으면 `COACH_SYSTEM`, 없으면 `agent`다. 10초 동안 캐시하며, 데이터베이스 오류 때는 `COACH_SYSTEM`으로 돌아간다. 전환할 때마다 `coach_mode_changes`에 한 행이 추가된다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`(첫 단계만 실행, 평가되지 않음)이며 지금처럼 시작할 때 한 번 읽는다. 두 변수 모두 다른 값이면 시작하지 않는다.
+- **stdout 로그 줄:** 접근 검사를 통과한 요청마다 지금처럼 JSON 한 줄을 출력한다: `event`(`coach_request`), `ts`, `request_id`, `mode`, `continuation_setting`, `transport`, `status`, `error_code`, `verified_first`, `added_final`, `verified_final`, `continuation`, `invariant_ok`, `first_ms`, `total_ms`, `llm_calls`, `searches`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `disconnected`, `question_head`(앞 40자). Vercel은 이 로그를 Hobby 1시간, Pro 1일 보관한다.
+- **저장되는 행:** 데이터베이스가 있으면 같은 요청이 `coach_request_log`의 한 행으로도 남는다: 모드와 그 출처(`db` 또는 `env`), 전송 방식, 상태, 오류 코드, 질문 전체, `quick_ms`, `first_ms`, `total_ms`, 모델 호출 수, 검색 수, 토큰, 검증 개수, 후속 단계, `result`(어드민 화면이 쓰는 답의 표현과 trace). 첫 답을 보는 시간은 `first_ms`이고, `null`이면 `total_ms`다. 필드의 뜻은 `frontend/README.md`에 있다.
+- **공개 데이터(D2, D4):** 질문은 원문 그대로 저장되고 `/admin`은 보호가 없으므로, 주소를 아는 사람은 누구나 저장된 질문을 모두 읽을 수 있다. 행은 책임자가 지울 때까지 남는다(판단 질문 R3).
 
 #### 검증 슬롯 잠금과 평가 재현성
 
@@ -761,11 +800,21 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 #### 어드민 화면(D4, D5)
 
-`/admin/`은 같은 배포 안의 읽기 전용 화면이며 보호가 없다. 주소를 아는 사람은 누구나 볼 수 있고, 화면에도 그렇게 적혀 있다. 화면은 `data.json`(계약 버전 1)을 읽는다. 이 파일은 `frontend/admin_data.py`가 평가 실행 하나로 만든다. 평가 질문 원문이 그대로 들어 있고(D2) 학습자 요청은 없다. 잠금 판정(`meta.lock`)은 trace에서 읽으므로, 제출 실행은 잠금 전 기록으로 보인다.
+`/admin/`은 같은 배포 안의 화면이며 보기에는 보호가 없다. 주소를 아는 사람은 누구나 볼 수 있고, 화면에도 그렇게 적혀 있다. 화면은 `data.json`(계약 버전 1)을 읽는다. 이 파일은 `frontend/admin_data.py`가 평가 실행 하나로 만들며, 평가 질문 원문이 그대로 들어 있다(D2). 잠금 판정(`meta.lock`)은 trace에서 읽으므로, 제출 실행은 잠금 전 기록으로 보인다. 데이터베이스가 있으면 화면은 저장된 실제 요청과 지금 적용 중인 모드도 보여 주고, 모드를 바꿀 수 있다(아래 어드민 API).
 
 - **시안:** 같은 데이터로 비교한 시안 다섯 개 중 B(학습자 앱의 브랜드 색과 둥근 카드)를 `frontend/admin/`에 넣었다. 탭은 **모드 비교**(같은 실행의 `baseline`과 `agent`를 같은 기준으로 비교), **요청 로그**, **지표**(p50 · p95 · p99), **실행 그래프**(요청 한 건의 노선도, 스윔레인 타임라인, 단계 상세) 네 개다.
 - **언어:** 머리말에서 한국어, 중국어, 영어로 바꿀 수 있고, `?lang=`으로 링크에 언어를 지정할 수 있다. 기본은 한국어다.
 - **제공 방식:** Vercel은 화면과 데이터를 `public/admin/`의 정적 파일로 제공한다. 화면이 데이터를 상대 경로로 읽으므로 `/admin`은 `/admin/`으로 이동한다. 로컬 서버도 같은 경로를 제공한다. `COACH_ADMIN_DIR`과 `COACH_ADMIN_DATA`로 화면 폴더와 데이터 폴더를 바꿀 수 있어, 다른 시안이나 실행도 다른 포트에서 확인할 수 있다. 명령과 패키징 옵션은 `frontend/README.md`에 있다.
+
+#### 어드민 API(D4, D5)
+
+| 요청 | 응답 |
+|---|---|
+| `GET /admin/requests.json?limit=300` | `{"schema_version": 1, "source": "live", "enabled", "requests", "traces", "answers"}`, 최신순. `requests`는 `data.json`과 같은 모양에 로그 행의 `transport`, `mode_source`, `quick_ms`를 더한 것이고, `traces`는 id별 span, `answers`는 id별 답이다. `enabled: false`는 데이터베이스가 없다는 뜻이다 |
+| `GET /admin/mode` | `{"mode", "source": "db" 또는 "env", "updated_at", "writable", "token_required", "history": [{"at", "from", "to"}]}`. 데이터베이스가 없으면 `writable`은 `false`다 |
+| `POST /admin/mode`, 본문 `{"mode": "baseline" 또는 "agent"}` | 200(`GET`과 같은 모양), 400 `invalid_mode`, 401 `token_required`, 409 `no_database` |
+
+- `COACH_ADMIN_TOKEN`은 선택 사항이다. 설정하면 `POST /admin/mode`에 같은 값의 `X-Admin-Token` 헤더가 필요하고, `hmac.compare_digest`로 비교한다. 보기는 계속 공개다(D4). 설정하지 않으면 주소를 아는 사람은 누구나 모든 학습자의 모드를 바꿀 수 있다(판단 질문 R2).
 
 #### 알려진 차이
 
@@ -773,13 +822,21 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - 설치된 APK는 JSON 흐름을 그대로 쓰므로, APK를 다시 빌드하기 전에는 결과를 먼저 보여 주지 않는다.
 - 마감은 호출과 호출 사이에서만 작업을 멈춘다. 이미 진행 중인 모델 호출은 끊지 않는다.
 - 배포용 패키지는 WSL에서만 만들 수 있다. 코퍼스 내보내기가 `sudo -u postgres psql`을 쓰고, MiniLM 스냅샷이 macOS의 Docker 데이터베이스에 없기 때문이다.
-- 어드민 화면은 패키징할 때 정한 모드를 보여 준다. 다시 패키징하지 않고 `COACH_SYSTEM`만 바꾸면 화면의 모드가 맞지 않게 된다.
+- 요청 로그와 모드 전환은 로컬에서 Docker Postgres로만 확인한다. Vercel에는 아직 Neon을 연결하지 않았으므로 주입되는 변수 이름, 저장되는 행, 실제 배포에서의 전환은 확인하지 않았다.
+- 모드 전환이 실행 중인 모든 인스턴스에 닿기까지 최대 10초(캐시)가 걸릴 수 있다. 저장된 행은 자동으로 만료되지 않는다.
+- 평가 데이터의 "데이터를 만든 모드"는 여전히 패키징 때 정해진다. 지금 적용 중인 모드는 `GET /admin/mode`에서 온다.
 - 어드민 화면의 JavaScript에는 자동 테스트가 없다. 서버 테스트는 화면을 제공하는 방식과 소스 규칙을 확인한다.
 - 앱의 기본 agent는 D6에서 측정한 잠금 agent다. 통과율은 baseline과 같고, 잠금 전 제출 agent처럼 더 낫지는 않다(판단 질문 R1).
 
 ## 11. 프로젝트 책임자 판단 질문
 
 **R1. D6 이후 제출 서술과 배포 기본값:** 잠금 agent를 기본으로 두고 "정확도는 baseline과 같고, 보낸 예문 유지와 후속 생략을 얻는다"고 적을까요? 추천: 예. 잠금이 D1의 약속을 지키고 strict 차이는 유의하지 않기 때문입니다. 다른 선택지: 기본값을 baseline으로 바꾸기(더 싸고 결과가 같음), 또는 제출 결과만 근거로 쓰고 D6 실행은 부록으로 두기.
+
+**R2. Vercel의 어드민 토큰:** `COACH_ADMIN_TOKEN`을 설정할까요? 없으면 `/admin`을 연 사람 누구나 모든 학습자의 실제 모드를 바꿀 수 있습니다. 추천: 설정. 보기는 계속 공개이고(D4) 전환에만 토큰이 필요합니다.
+
+**R3. 저장된 질문의 보관 기간:** Neon의 행은 지울 때까지 남습니다. 추천: 채점이 끝날 때까지 두고, 그 뒤 행이나 Neon 프로젝트를 지웁니다. 다른 선택지: 포트폴리오 근거로 남기되, 모든 질문이 `/admin`에 계속 공개된다는 점을 받아들입니다.
+
+**책임자 작업(질문 아님):** Vercel 대시보드에서 Neon을 연결합니다(절차는 `frontend/README.md`). 그전까지 배포는 stdout 로그 줄만 남기고, `/admin`은 모드를 바꿀 수 없습니다.
 
 이 문서에는 이 밖에 지금 결정할 사항이 없습니다. 백그라운드 검색 중 새 코치 질문을 어떻게 할지와 어드민 데이터를 커밋할지는 `frontend/README.md`의 판단 질문 1, 2에 있습니다. 어드민 시안은 B로 정했습니다.
 

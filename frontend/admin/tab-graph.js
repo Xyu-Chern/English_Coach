@@ -3,8 +3,8 @@
    ② 스윔레인 워터폴(시안 C 방식): 구성요소 레인마다 막대, 시간축, 첫 응답 세로선, 회차 구분.
    ③ 단계 상세(graph-detail.js). 노드를 고르면 그 노드의 막대가, 막대를 고르면 그 노드가 같이 강조된다.
    엣지 · 스윔레인 표식은 실제 위치를 재서 그린다(폭 · 글자 크기가 바뀌면 dyn에서 다시). 화면 문구는 GRAPH_TEXT에 모은다. */
-import { $, $$, fill, fmtK, fmtN, h, icon, rootPx, sec, secU, shortId, sum, sv } from "./ui.js";
-import { D, REQ, getTraces, lockApplied, noEx, spansOf } from "./data.js";
+import { $, $$, fill, fmtK, fmtN, h, icon, rootPx, sec, secU, shortId, sum, sv, utc } from "./ui.js";
+import { D, LIVE, REQ, getTraces, lockApplied, noEx, spansOf } from "./data.js";
 import {
   KIND, STATUS, chip, contChip, exText, kk, markKind, modeBadge, mono, onSeg, phead, pill, preChip, segBtns, stageTitle,
   statusBadge,
@@ -14,6 +14,8 @@ import {
 } from "./graph-model.js";
 import { drawDetail } from "./graph-detail.js";
 import { gtext } from "./i18n-graph.js";
+import { t } from "./i18n.js";
+import "./i18n-live.js";
 import { hscrollCue, register, showTab, updateLayout } from "./shell.js";
 
 /* 화면 문구: i18n-graph.js의 "graph.tab.*". 언어 보기라서 읽을 때마다 지금 언어 값이 나온다(탭은 언어가 바뀌면 다시 그려진다) */
@@ -38,7 +40,9 @@ register("graph", async panel => {
     G = { req: pick, picked: null, sel: null, span: null, expanded: {}, lay: "stack" };
   }
   const pick = h("select", { id: "gpick" },
-    D.requests.map(x => h("option", { value: x.id }, T.opt(x, (STATUS[x.status] || ["—"])[0]))));
+    h("optgroup", { label: t("live.groupEval") },
+      D.requests.map(x => h("option", { value: x.id }, T.opt(x, (STATUS[x.status] || ["—"])[0])))),
+    liveGroup());
   fill(panel,
     phead(T.title, [T.lead, !lockApplied() && [" ", h("b", T.preLock[0]), T.preLock[1]]]),
     h("div.gtop",
@@ -91,6 +95,21 @@ function openReq(id, focusSel) {
   drawGraph();
   const f = focusSel && $(focusSel);
   if (f) f.focus();
+}
+
+/* 고르기 목록의 '실제 요청' 묶음(요청 로그에서 실제 요청을 읽은 뒤에만 생김) */
+const liveOpt = x => t("live.opt", {
+  time: utc(x.created_at || x.started_at), mode: x.mode, st: (STATUS[x.status] || ["—"])[0],
+  q: (x.question || "").slice(0, 40),
+});
+const liveGroup = () => LIVE.rows.length ? h("optgroup", { id: "gpick-live", label: t("live.groupLive") },
+  LIVE.rows.map(x => h("option", { value: x.id }, liveOpt(x)))) : null;
+function syncLiveOpts(r) {
+  const pick = $("#gpick");
+  if (!pick || !r.live || [...pick.options].some(o => o.value === r.id)) return;
+  const old = $("#gpick-live"), g = liveGroup();
+  if (old) old.remove();
+  if (g) pick.append(g);
 }
 
 function exOpts() {
@@ -207,6 +226,7 @@ function drawHead(r) {
   const srcOpt = ([v, l, id]) => [v, [h("span", l), id ? h("span.mono", shortId(id)) : h("span", T.exNone)],
     { "data-id": id, disabled: !id, title: id || T.logTip }];
   fill($("#gsrc"), segBtns([...opts, ["log", T.ex.log, logId]].map(srcOpt), v => src === v));
+  syncLiveOpts(r);
   $("#gpick").value = r.id;
   const ex = D.examples || {}, isEx = (opts.find(o => o[2] === r.id) || [null])[0];
   const other = REQ.get(ex[isEx === "agent" ? "baseline" : "agent"]);
@@ -214,7 +234,7 @@ function drawHead(r) {
   if ((isEx === "baseline" || isEx === "agent") && other) {
     note = T.exPair(mono(r.task_id), r.attempt, r.verified_first, r.mode, r.added_final, other.mode, other.added_final);
   } else if (isEx === "skipped") {
-    note = [T.exSkip(r.verified_first), r.mode === "baseline" && !lockApplied() ? T.exSkipPre : ""];
+    note = [T.exSkip(r.verified_first), r.mode === "baseline" && !lockApplied(r) ? T.exSkipPre : ""];
   }
   const box = $("#gexnote");
   box.hidden = !note;
@@ -223,7 +243,7 @@ function drawHead(r) {
 
 function drawSummary(r, R) {
   const fv = [...R.lockSet].length ? [...R.lockSet] : null;
-  const pre = r.mode === "agent" && r.continuation === "ran" && !lockApplied() && R.val1[0] &&
+  const pre = r.mode === "agent" && r.continuation === "ran" && !lockApplied(r) && R.val1[0] &&
     (R.val1[0].detail || {}).verified > 0;
   const fvList = pre ? (R.val1[0].detail.slots || []).filter(x => x.status === "verified").map(x => "#" + x.slot).join("·") : "";
   fill($("#gsum"), h("div.gq", modeBadge(r.mode), statusBadge(r.status), h("q", r.question ?? noQuestion())),
@@ -383,7 +403,7 @@ function laneEl(lane, R, M) {
   const status = active ? chip(ranCount ? "lime" : "", null, LN.count(ranCount, isBL))
     : r.mode !== m ? chip("", null, LN.other(r.mode))
       : R.skipped ? chip("ok", "skip", LN.contSkip(r.verified_first)) : chip("", null, LN.noCont(why));
-  const preLock = active && !isBL && !lockApplied()
+  const preLock = active && !isBL && !lockApplied(r)
     ? h("span.prechip", { title: D.meta.lock.note || "" }, icon("clock"),
       LN.preLock + (r.lost_first ? " · " + MT.lostN(r.lost_first) : "")) : null;
   const lockEl = active && LK.size ? h("span.lockc", { title: MT.lockTip }, icon("lock"), MT.lock(lockTxt(LK))) : null;

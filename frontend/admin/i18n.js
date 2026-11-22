@@ -138,7 +138,7 @@ register({
   ko: {
     "app.title": "Phrase Room 어드민",
     "app.eyebrow": "Phrase Room · 운영",
-    "app.concept": "평가 실행 기록으로 모드 · 요청 · 지표 · 실행 경로를 살펴봐요",
+    "app.concept": "실제 요청과 평가 실행 기록으로 모드 · 요청 · 지표 · 실행 경로를 살펴봐요",
     "app.skip": "본문으로 건너뛰기",
     "app.tabsLabel": "어드민 화면",
     "app.langLabel": "화면 언어",
@@ -181,7 +181,7 @@ register({
   zh: {
     "app.title": "Phrase Room 管理后台",
     "app.eyebrow": "Phrase Room · 运营",
-    "app.concept": "通过评测运行记录，查看模式、请求、指标和执行路径",
+    "app.concept": "通过真实请求和评测运行记录，查看模式、请求、指标和执行路径",
     "app.skip": "跳到正文",
     "app.tabsLabel": "后台页面",
     "app.langLabel": "界面语言",
@@ -224,7 +224,7 @@ register({
   en: {
     "app.title": "Phrase Room Admin",
     "app.eyebrow": "Phrase Room · Operations",
-    "app.concept": "Explore modes, requests, metrics, and execution paths from evaluation runs",
+    "app.concept": "Explore modes, requests, metrics, and execution paths from live requests and evaluation runs",
     "app.skip": "Skip to main content",
     "app.tabsLabel": "Admin views",
     "app.langLabel": "Display language",

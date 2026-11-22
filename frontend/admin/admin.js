@@ -1,5 +1,6 @@
 /* Phrase Room 어드민 · 시안 B(브랜드 확장) — 진입점(<script type="module" src="admin.js">).
-   - 같은 폴더의 data.json(어드민 데이터 계약 v1)만 읽는 읽기 전용 화면. 모드 변경·저장 기능 없음(D4 · D5).
+   - 같은 폴더의 data.json(어드민 데이터 계약 v1)을 읽는다. 서버가 있으면 실제 요청(requests.json)과
+     현재 모드(mode, 바꾸기 포함)도 상대 경로로 읽는다(PR④ · tab-logs.js · mode-card.js). 보기는 공개(D4).
    - 모듈(빌드 도구 없음): ui(DOM · 형식) → data(형식 확인 · 파생값) → parts(공용 조각) → shell(탭 · 레이아웃)
      → tab-flags · tab-logs · tab-metrics · tab-graph(탭 4개). 외부 JS 라이브러리 없음.
    - 보안: 데이터 문자열은 textContent · DOM API로만 넣는다(HTML 문자열을 해석하는 API는 쓰지 않음).

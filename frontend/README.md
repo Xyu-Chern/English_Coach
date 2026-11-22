@@ -35,9 +35,9 @@ The live Vercel app serves the chat UI, Android download and coach at the same H
 
 Refusals (401, 403, 422 `invalid_input`, 429 `coach_busy`) are plain HTTP errors and come before any line. The JSON reply is the whole last answer, as old clients expect, so it can include unverified candidates that the stream leaves out after a `first`. If the continuation fails after the first stage verified examples, the reply still returns them.
 
-- **Mode:** `COACH_SYSTEM` is `agent` (the locked agent, the default) or `baseline`. `COACH_CONTINUATION` is `on` (the default) or `off`. `off` runs the first stage only, a setting that was not evaluated. The server reads both when it starts, and any other value stops the start. Locally, set them before the start, for example `COACH_SYSTEM=baseline python -m frontend.server --port 8790`. On Vercel, change them under Settings → Environment Variables, then redeploy.
+- **Mode:** `COACH_SYSTEM` is `agent` (the locked agent, the default) or `baseline`. `COACH_CONTINUATION` is `on` (the default) or `off`. `off` runs the first stage only, a setting that was not evaluated. The server reads both when it starts, and any other value stops the start. Locally, set them before the start, for example `COACH_SYSTEM=baseline python -m frontend.server --port 8790`. With a database, a mode switched on `/admin` wins over `COACH_SYSTEM` without a redeploy (see **Live request log and mode switch**). Without one, change `COACH_SYSTEM` on Vercel under Settings → Environment Variables, then redeploy.
 - **Limits:** The work stops 280 s after the request starts, because Vercel's `maxDuration` is 300 s. A stream then ends with an `error` line whose code is `timeout`. The local server takes `--deadline` or `COACH_DEADLINE_SECONDS` (1–3600 s) for a slow provider or the relay. One request runs per process. The slot returns when the stream ends or the work ends, whichever comes first. If the client leaves, the work stops at its next model call or search.
-- **Request log:** Each request that passes the access checks prints one JSON line to stdout. On Vercel, search the runtime logs for `coach_request`. Nothing else about a request is stored. Vercel keeps runtime logs for 1 hour on Hobby and 1 day on Pro.
+- **Request log:** Each request that passes the access checks prints one JSON line to stdout. On Vercel, search the runtime logs for `coach_request`. Vercel keeps runtime logs for 1 hour on Hobby and 1 day on Pro. With a database, the request is also saved as one row with the whole question (see **Live request log and mode switch**).
 
 | Field | Meaning |
 |---|---|
@@ -65,14 +65,14 @@ The web and Android client asks for NDJSON (`Accept: application/x-ndjson, appli
 | `error` only, or an HTTP refusal | The existing error line with **Retry** |
 
 - **Records:** the device history keeps each answer's first items, the added items and a stage (`pending`, `done`, `stopped` or `incomplete`). The history page shows both groups, and cards from either can be saved. A follow-up question's context still uses the first item.
-- **Leaving the page:** nothing is kept on the server (D5). On the next start, a record that is still `pending` becomes `incomplete`. A notice then offers **View first results** and **Look again**, which sends the same question with the context it sent before.
+- **Leaving the page:** the server keeps no answer for the learner to fetch later (D5); a saved log row is for `/admin` only. On the next start, a record that is still `pending` becomes `incomplete`. A notice then offers **View first results** and **Look again**, which sends the same question with the context it sent before.
 - **One search at a time:** the server answers one request per process, so a new coach question waits until the background search ends. The question box says so. Library searches are not held.
 - **Accessibility and layout:** one polite live region speaks only when an answer arrives: the first examples and the end of the search. The notice sits outside the redrawn page, and a redraw keeps the cursor in the question box. The tabs are visible on the chat page too, so the **Podcast** tab's badge can be seen and tapped at once; the notice and the slot under the answer also link to it. With large text or a short screen, the question box no longer sticks to the bottom.
 - **Checks:** server tests cover the stream; the screen states were checked in a headless browser with tools kept outside the repository. `ask()` (the 300 s abort, the running limit, the JSON and relay fallbacks) has no automated test.
 
 ## Admin page (/admin)
 
-The admin page is read-only and open (D4): anyone with the address can see it, and the page says so. It ships in the same deployment as the app. Its data is one evaluation run's record, `data.json` built by `frontend/admin_data.py`. It holds no learner requests, because the deployment stores none (D5). Changing the mode still means changing `COACH_SYSTEM` and redeploying.
+The admin page is open for viewing (D4): anyone with the address can see it, and the page says so. It ships in the same deployment as the app. Its evaluation data is one run's record, `data.json` built by `frontend/admin_data.py`. With a database, it also shows live requests and switches the mode (see **Live request log and mode switch**).
 
 | Where | Page | Data |
 |---|---|---|
@@ -109,13 +109,54 @@ COACH_SYSTEM=baseline COACH_ADMIN_DATA=<data folder> python -m frontend.server -
 ```
 
 - Each port serves the learner app at `/` and the admin page at `/admin/`. Port 8788 shows `frontend/admin`, 8789 another design folder, and 8790 the learner app on the baseline.
-- Opening `/admin/` asks the coach nothing, so it needs no database or model settings. A question in the learner app is a paid model call and needs the settings from **Run and install**.
-- The page shows the mode the data was built with: `--coach-system`, else `COACH_SYSTEM`, else `agent`.
+- Opening `/admin/` asks the coach nothing, so it needs no model settings. The live requests and the mode switch use the database when one is set. A question in the learner app is a paid model call and needs the settings from **Run and install**.
+- The evaluation data shows the mode it was built with: `--coach-system`, else `COACH_SYSTEM`, else `agent`.
+
+## Live request log and mode switch
+
+With a database, the server saves every coach request and reads the mode from it. Without one, both are off and the app works as before. Contracts are in `design.md` (Mode and request log, Admin API).
+
+- **Database URL:** `COACH_LOG_DATABASE_URL`, else `DATABASE_URL`, else `POSTGRES_URL`. Locally the `.env` `DATABASE_URL` (Docker Postgres) is picked up with no extra step. At start the server creates `coach_request_log`, `coach_settings` and `coach_mode_changes` if they are missing. `frontend/sql/request_log.sql` holds the same SQL.
+- **Mode in effect:** the database's `coach_system` setting, else `COACH_SYSTEM`, else `agent`. It is cached for 10 s, and a database error falls back to `COACH_SYSTEM`. `GET /admin/mode` shows the mode, its source (`db` or `env`) and the switch history.
+- **Admin token:** optional. Set `COACH_ADMIN_TOKEN` to require the header `X-Admin-Token` on `POST /admin/mode`. Viewing stays open.
+- **Public data:** questions are saved as written and `/admin` is open, so anyone with the address can read them. Rows stay until deleted.
+
+| Saved column | Meaning |
+|---|---|
+| `id`, `created_at` | Row number and time saved |
+| `mode`, `mode_source`, `transport` | `agent` or `baseline`; `db` or `env`; `ndjson` or `json` |
+| `status`, `error_code` | As in the stdout line |
+| `question` | The whole question, as written |
+| `quick_ms`, `first_ms`, `total_ms` | The first stage's time; time to the `first` line (`null` without one); time to the end |
+| `llm_calls`, `searches`, `input_tokens`, `output_tokens` | As in the stdout line |
+| `verified_first`, `added_final`, `verified_final`, `continuation` | As in the stdout line |
+| `result` | JSON with the answer's expressions and the trace, which `/admin` turns into the request log and run graph |
+
+```sh
+curl -s 'http://127.0.0.1:8787/admin/requests.json?limit=20'
+curl -s http://127.0.0.1:8787/admin/mode
+curl -s -X POST -H 'Content-Type: application/json' -H "X-Admin-Token: $COACH_ADMIN_TOKEN" \
+  -d '{"mode": "baseline"}' http://127.0.0.1:8787/admin/mode
+```
+
+### Owner setup on Vercel (Neon, free)
+
+The free Hobby plan cannot invite members, so the project owner does this once in the Vercel dashboard:
+
+1. Open the project → **Integrations** → **Browse Marketplace** → **Neon** → **Install**.
+2. Pick the **Free** plan, create the database and connect it to this project.
+3. Under **Settings → Environment Variables**, check the names Neon added. `DATABASE_URL` or `POSTGRES_URL` works as is. If needed (for example, the name is used for something else), add `COACH_LOG_DATABASE_URL` with the same connection string.
+4. Optional: add `COACH_ADMIN_TOKEN` (judgment question R2 in `design.md`).
+5. **Redeploy**. New variables reach only new deployments.
+6. Check: `GET /admin/mode` shows `"writable": true`, and after one question `GET /admin/requests.json` lists it.
+
+Locally nothing is needed: the Docker Postgres from `.env` is used.
 
 ## Project Owner Judgment Questions
 
 1. While a background search runs, a new coach question waits, because the server answers one request per process and would refuse it as busy. Keep this default, or let the question go and accept an occasional busy reply?
 2. Should `frontend/admin/data.json` from the locked re-evaluation run be committed? It is about 3 MB and holds the evaluation questions verbatim. Committing it lets any machine package the same `/admin`. Otherwise it is built at packaging time from the git-ignored results folder, which exists on one machine only. Recommended: commit that one file.
+3. **Owner action:** attach Neon on Vercel as in **Owner setup on Vercel**. Until then the deployed app keeps only the stdout line, and `/admin` cannot switch the mode. Whether to set `COACH_ADMIN_TOKEN` and how long to keep saved questions are judgment questions R2 and R3 in `design.md`.
 
 # 中文
 
@@ -154,9 +195,9 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 拒绝（401、403、422 `invalid_input`、429 `coach_busy`）是普通 HTTP 错误，在任何行之前返回。JSON 回复就是流最终会显示的答案。第一阶段已核对例句后，即使后续阶段失败，回复仍会返回这些例句。
 
-- **模式：** `COACH_SYSTEM` 为 `agent`（加锁的 agent，默认）或 `baseline`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`。`off` 只运行第一阶段，这一设置没有经过评估。服务启动时读取这两个值，其他值会让启动失败。在本地，启动前设置即可，例如 `COACH_SYSTEM=baseline python -m frontend.server --port 8790`。在 Vercel 上，到 Settings → Environment Variables 修改，然后重新部署。
+- **模式：** `COACH_SYSTEM` 为 `agent`（加锁的 agent，默认）或 `baseline`。`COACH_CONTINUATION` 为 `on`（默认）或 `off`。`off` 只运行第一阶段，这一设置没有经过评估。服务启动时读取这两个值，其他值会让启动失败。在本地，启动前设置即可，例如 `COACH_SYSTEM=baseline python -m frontend.server --port 8790`。有数据库时，在 `/admin` 切换的模式优先于 `COACH_SYSTEM`，无需重新部署（见 **线上请求日志与模式切换**）。没有数据库时，到 Vercel 的 Settings → Environment Variables 修改 `COACH_SYSTEM`，然后重新部署。
 - **限制：** 请求开始 280 秒后停止工作，因为 Vercel 的 `maxDuration` 是 300 秒。此时流以 `code` 为 `timeout` 的 `error` 行结束。每个进程同时只处理一个请求。流结束或工作结束时（以先到者为准）归还名额。客户端离开后，工作会在下一次模型调用或检索前停止。
-- **请求日志：** 每个通过访问检查的请求都向 stdout 打印一行 JSON。在 Vercel 上，可在运行日志中搜索 `coach_request`。请求的其他内容都不保存。Vercel 运行日志在 Hobby 计划保留 1 小时，在 Pro 计划保留 1 天。
+- **请求日志：** 每个通过访问检查的请求都向 stdout 打印一行 JSON。在 Vercel 上，可在运行日志中搜索 `coach_request`。Vercel 运行日志在 Hobby 计划保留 1 小时，在 Pro 计划保留 1 天。有数据库时，请求还会连同完整问题保存为一行（见 **线上请求日志与模式切换**）。
 
 | 字段 | 含义 |
 |---|---|
@@ -184,14 +225,14 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | 只有 `error`，或 HTTP 拒绝 | 原有的错误提示和 **重试** |
 
 - **记录：** 设备上的历史为每个回答保存先前条目、新增条目和阶段（`pending`、`done`、`stopped` 或 `incomplete`）。历史页显示两组内容，两组卡片都可以收藏。后续提问的场景仍使用第一条例句。
-- **离开页面：** 服务端不保存任何内容（D5）。下次打开时，仍为 `pending` 的记录变为 `incomplete`，提示条提供 **查看先前结果** 和 **重新查找**。重新查找会用同一问题和当时发送的场景再次提问。
+- **离开页面：** 服务端不保存供学习者之后取回的答案（D5）；保存的日志行只供 `/admin` 使用。下次打开时，仍为 `pending` 的记录变为 `incomplete`，提示条提供 **查看先前结果** 和 **重新查找**。重新查找会用同一问题和当时发送的场景再次提问。
 - **一次一个查找：** 服务端每个进程同时只处理一个请求，所以后台查找结束前，新的教练提问需要等待，输入框下方会说明。表达库搜索不受影响。
 - **无障碍与布局：** 只有一个礼貌型实时区域，只在回答到达时播报：先到的例句和查找结束。提示条位于会重绘的页面之外，重绘时输入框保留光标。聊天页也显示标签栏，**播客** 页的徽标一眼可见，可以直接点开；提示条和回答下方的空位也链接到那里。字号很大或屏幕很矮时，输入框不再固定在底部。
 - **检查：** 服务端测试覆盖流式传输；各个画面状态在无头浏览器中检查过，所用工具不在仓库里。`ask()`（300 秒中止、同时查找上限、JSON 和中继回退）没有自动化测试。
 
 ## 管理页（/admin）
 
-管理页只读且不设保护（D4）：知道网址的人都能查看，页面上也会说明这一点。它和应用放在同一个部署里。数据是一次评估运行的记录，即 `frontend/admin_data.py` 生成的 `data.json`。其中没有学习者请求，因为部署不保存任何请求（D5）。切换模式仍需修改 `COACH_SYSTEM` 并重新部署。
+管理页查看不设保护（D4）：知道网址的人都能查看，页面上也会说明这一点。它和应用放在同一个部署里。评估数据是一次运行的记录，即 `frontend/admin_data.py` 生成的 `data.json`。有数据库时，页面还会显示线上请求并可切换模式（见 **线上请求日志与模式切换**）。
 
 | 位置 | 页面 | 数据 |
 |---|---|---|
@@ -228,13 +269,54 @@ COACH_SYSTEM=baseline COACH_ADMIN_DATA=<数据文件夹> python -m frontend.serv
 ```
 
 - 每个端口都在 `/` 提供学习端，在 `/admin/` 提供管理页。8788 显示 `frontend/admin`，8789 显示另一个设计稿文件夹，8790 是使用 baseline 的学习端。
-- 打开 `/admin/` 不会向教练提问，所以不需要数据库或模型配置。在学习端提问会产生付费模型调用，并需要「启动与安装」中的配置。
-- 页面显示生成数据时的模式：先用 `--coach-system`，其次 `COACH_SYSTEM`，否则为 `agent`。
+- 打开 `/admin/` 不会向教练提问，所以不需要模型配置。设置了数据库时，线上请求和模式切换会使用它。在学习端提问会产生付费模型调用，并需要「启动与安装」中的配置。
+- 评估数据显示生成时的模式：先用 `--coach-system`，其次 `COACH_SYSTEM`，否则为 `agent`。
+
+## 线上请求日志与模式切换
+
+有数据库时，服务端保存每个教练请求，并从数据库读取模式。没有数据库时，两者都关闭，应用照旧运行。契约见 `design.md`（模式与请求日志、管理页 API）。
+
+- **数据库地址：** 依次使用 `COACH_LOG_DATABASE_URL`、`DATABASE_URL`、`POSTGRES_URL`。本地自动使用 `.env` 中的 `DATABASE_URL`（Docker Postgres），无需额外步骤。服务启动时，如果缺少 `coach_request_log`、`coach_settings` 和 `coach_mode_changes`，就会创建它们。`frontend/sql/request_log.sql` 中是相同的 SQL。
+- **生效的模式：** 依次取数据库中的 `coach_system` 设置、`COACH_SYSTEM`、`agent`。结果缓存 10 秒，数据库出错时退回 `COACH_SYSTEM`。`GET /admin/mode` 显示模式、来源（`db` 或 `env`）和切换历史。
+- **管理令牌：** 可选。设置 `COACH_ADMIN_TOKEN` 后，`POST /admin/mode` 需要 `X-Admin-Token` 请求头。查看仍然公开。
+- **公开数据：** 问题原样保存，`/admin` 不设保护，因此知道网址的人都能读到。这些行会一直保留，直到被删除。
+
+| 保存的列 | 含义 |
+|---|---|
+| `id`、`created_at` | 行号和保存时间 |
+| `mode`、`mode_source`、`transport` | `agent` 或 `baseline`；`db` 或 `env`；`ndjson` 或 `json` |
+| `status`、`error_code` | 与 stdout 日志行相同 |
+| `question` | 原样保存的完整问题 |
+| `quick_ms`、`first_ms`、`total_ms` | 第一阶段用时；到 `first` 行的时间（没有时为 `null`）；到结束的时间 |
+| `llm_calls`、`searches`、`input_tokens`、`output_tokens` | 与 stdout 日志行相同 |
+| `verified_first`、`added_final`、`verified_final`、`continuation` | 与 stdout 日志行相同 |
+| `result` | 包含答案表达和 trace 的 JSON，`/admin` 据此生成请求日志和执行图 |
+
+```sh
+curl -s 'http://127.0.0.1:8787/admin/requests.json?limit=20'
+curl -s http://127.0.0.1:8787/admin/mode
+curl -s -X POST -H 'Content-Type: application/json' -H "X-Admin-Token: $COACH_ADMIN_TOKEN" \
+  -d '{"mode": "baseline"}' http://127.0.0.1:8787/admin/mode
+```
+
+### 项目负责人在 Vercel 上的设置（Neon 免费版）
+
+免费的 Hobby 计划不能邀请成员，所以由项目负责人在 Vercel 控制台中完成一次：
+
+1. 打开项目 → **Integrations** → **Browse Marketplace** → **Neon** → **Install**。
+2. 选择 **Free** 计划，创建数据库并连接到本项目。
+3. 在 **Settings → Environment Variables** 中查看 Neon 添加的变量名。`DATABASE_URL` 或 `POSTGRES_URL` 可以直接使用。必要时（例如该名称已用于其他用途），用同一连接字符串添加 `COACH_LOG_DATABASE_URL`。
+4. 可选：添加 `COACH_ADMIN_TOKEN`（`design.md` 判断题 R2）。
+5. **Redeploy**。新变量只对新的部署生效。
+6. 检查：`GET /admin/mode` 显示 `"writable": true`；提问一次后，`GET /admin/requests.json` 中能看到这条请求。
+
+本地无需任何操作：会使用 `.env` 中的 Docker Postgres。
 
 ## 项目负责人判断题
 
 1. 后台查找进行时，新的教练提问会等待，因为服务端每个进程只处理一个请求，否则会以忙碌拒绝。保留这一默认做法，还是允许发送并接受偶尔的忙碌回复？
 2. 是否提交由加锁重新评估运行生成的 `frontend/admin/data.json`？它约 3 MB，原样包含评估问题。提交后，任何机器都能打包出相同的 `/admin`；不提交时，只能在打包时从被 git 忽略的结果文件夹生成，而这个文件夹只在一台机器上。建议：只提交这一个文件。
+3. **项目负责人操作：** 按 **项目负责人在 Vercel 上的设置** 接入 Neon。在此之前，部署的应用只保留 stdout 日志行，`/admin` 也不能切换模式。是否设置 `COACH_ADMIN_TOKEN`，以及已保存问题保留多久，见 `design.md` 判断题 R2 和 R3。
 
 # 한국어
 
@@ -273,9 +355,9 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 거절(401, 403, 422 `invalid_input`, 429 `coach_busy`)은 일반 HTTP 오류이며 어떤 줄보다 먼저 온다. JSON 응답은 스트림이 마지막에 보여 줄 답과 같다. 첫 단계에서 예문이 검증된 뒤 후속 단계가 실패해도 응답은 그 예문을 돌려준다.
 
-- **모드:** `COACH_SYSTEM`은 `agent`(잠금 agent, 기본값) 또는 `baseline`이다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`다. `off`는 첫 단계만 실행하며, 평가되지 않은 설정이다. 서버는 시작할 때 두 값을 읽고, 다른 값이면 시작하지 않는다. 로컬에서는 시작하기 전에 정한다. 예: `COACH_SYSTEM=baseline python -m frontend.server --port 8790`. Vercel에서는 Settings → Environment Variables에서 바꾼 뒤 다시 배포한다.
+- **모드:** `COACH_SYSTEM`은 `agent`(잠금 agent, 기본값) 또는 `baseline`이다. `COACH_CONTINUATION`은 `on`(기본값) 또는 `off`다. `off`는 첫 단계만 실행하며, 평가되지 않은 설정이다. 서버는 시작할 때 두 값을 읽고, 다른 값이면 시작하지 않는다. 로컬에서는 시작하기 전에 정한다. 예: `COACH_SYSTEM=baseline python -m frontend.server --port 8790`. 데이터베이스가 있으면 `/admin`에서 바꾼 모드가 재배포 없이 `COACH_SYSTEM`보다 우선한다(**실제 요청 로그와 모드 전환** 참고). 데이터베이스가 없으면 Vercel의 Settings → Environment Variables에서 `COACH_SYSTEM`을 바꾼 뒤 다시 배포한다.
 - **제한:** 작업은 요청 시작 280초 뒤에 멈춘다. Vercel의 `maxDuration`이 300초이기 때문이다. 이때 스트림은 `code`가 `timeout`인 `error` 줄로 끝난다. 프로세스당 한 번에 요청 하나만 처리한다. 자리는 스트림이 끝나거나 작업이 끝날 때 중 먼저 오는 때에 반환된다. 클라이언트가 떠나면 작업은 다음 모델 호출이나 검색 전에 멈춘다.
-- **요청 로그:** 접근 검사를 통과한 요청마다 stdout에 JSON 한 줄을 출력한다. Vercel에서는 런타임 로그에서 `coach_request`로 검색한다. 그 밖의 요청 내용은 저장하지 않는다. Vercel 런타임 로그는 Hobby에서 1시간, Pro에서 1일 동안 보관된다.
+- **요청 로그:** 접근 검사를 통과한 요청마다 stdout에 JSON 한 줄을 출력한다. Vercel에서는 런타임 로그에서 `coach_request`로 검색한다. Vercel 런타임 로그는 Hobby에서 1시간, Pro에서 1일 동안 보관된다. 데이터베이스가 있으면 요청이 질문 전체와 함께 한 행으로도 저장된다(**실제 요청 로그와 모드 전환** 참고).
 
 | 필드 | 뜻 |
 |---|---|
@@ -303,14 +385,14 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | `error`만, 또는 HTTP 거절 | 기존 오류 문구와 **재시도** |
 
 - **기록:** 기기 기록은 답마다 처음 항목, 추가 항목, 단계(`pending`, `done`, `stopped`, `incomplete`)를 보관한다. 기록 화면은 두 묶음을 모두 보여 주고, 어느 쪽 카드든 저장할 수 있다. 후속 질문의 맥락은 지금처럼 첫 항목을 쓴다.
-- **화면을 떠났을 때:** 서버에는 아무것도 남지 않는다(D5). 다음에 앱을 열 때 아직 `pending`인 기록은 `incomplete`가 된다. 공지에서 **처음 결과 보기**와 **다시 찾기**를 고를 수 있고, 다시 찾기는 같은 질문을 그때 보낸 맥락과 함께 다시 보낸다.
+- **화면을 떠났을 때:** 서버는 학습자가 나중에 받아 갈 답을 남기지 않는다(D5). 저장된 로그 행은 `/admin`에서만 쓴다. 다음에 앱을 열 때 아직 `pending`인 기록은 `incomplete`가 된다. 공지에서 **처음 결과 보기**와 **다시 찾기**를 고를 수 있고, 다시 찾기는 같은 질문을 그때 보낸 맥락과 함께 다시 보낸다.
 - **한 번에 한 검색:** 서버는 프로세스당 요청 하나만 처리한다. 그래서 백그라운드 검색이 끝날 때까지 새 코치 질문은 기다리며, 입력창 아래에 그 이유를 보여 준다. 표현 모음 검색은 막지 않는다.
 - **접근성과 배치:** polite 라이브 영역 하나가 답이 도착할 때만 읽어 준다(처음 예문, 검색 끝). 공지는 다시 그려지는 화면 밖에 있고, 다시 그릴 때 입력창의 커서를 유지한다. 채팅 화면에도 탭을 보여 주므로 **팟캐스트** 탭의 배지를 바로 보고 누를 수 있다. 공지와 답 아래 빈 자리도 그 탭으로 연결된다. 글자가 아주 크거나 화면이 낮으면 입력창을 아래에 고정하지 않는다.
 - **확인:** 서버 테스트가 스트리밍을 다룬다. 화면 상태는 저장소 밖 도구로 헤드리스 브라우저에서 확인했다. `ask()`(300초 중단, 동시 검색 제한, JSON·릴레이 대체 흐름)에는 자동 테스트가 없다.
 
 ## 어드민 화면(/admin)
 
-어드민 화면은 읽기 전용이며 보호가 없다(D4). 주소를 아는 사람은 누구나 볼 수 있고, 화면에도 그렇게 적혀 있다. 앱과 같은 배포에 들어간다. 데이터는 평가 실행 기록 하나로, `frontend/admin_data.py`가 만든 `data.json`이다. 배포는 요청을 저장하지 않으므로 학습자 요청은 들어 있지 않다(D5). 모드를 바꾸려면 지금처럼 `COACH_SYSTEM`을 바꾸고 다시 배포한다.
+어드민 화면은 보기에 보호가 없다(D4). 주소를 아는 사람은 누구나 볼 수 있고, 화면에도 그렇게 적혀 있다. 앱과 같은 배포에 들어간다. 평가 데이터는 실행 기록 하나로, `frontend/admin_data.py`가 만든 `data.json`이다. 데이터베이스가 있으면 실제 요청도 보여 주고 모드를 바꿀 수 있다(**실제 요청 로그와 모드 전환** 참고).
 
 | 위치 | 화면 | 데이터 |
 |---|---|---|
@@ -347,10 +429,51 @@ COACH_SYSTEM=baseline COACH_ADMIN_DATA=<데이터 폴더> python -m frontend.ser
 ```
 
 - 포트마다 `/`에 학습자 앱, `/admin/`에 어드민 화면이 있다. 8788은 `frontend/admin`, 8789는 다른 시안 폴더, 8790은 baseline으로 답하는 학습자 앱이다.
-- `/admin/`을 열어도 코치에게 질문하지 않으므로 데이터베이스나 모델 설정이 필요 없다. 학습자 앱에서 질문하면 유료 모델 호출이 생기고, '실행 및 설치'의 설정이 필요하다.
-- 화면은 데이터를 만들 때의 모드를 보여 준다. 모드는 `--coach-system`, 없으면 `COACH_SYSTEM`, 그것도 없으면 `agent`다.
+- `/admin/`을 열어도 코치에게 질문하지 않으므로 모델 설정이 필요 없다. 데이터베이스가 설정되어 있으면 실제 요청과 모드 전환이 그것을 쓴다. 학습자 앱에서 질문하면 유료 모델 호출이 생기고, '실행 및 설치'의 설정이 필요하다.
+- 평가 데이터는 만들 때의 모드를 보여 준다. 모드는 `--coach-system`, 없으면 `COACH_SYSTEM`, 그것도 없으면 `agent`다.
+
+## 실제 요청 로그와 모드 전환
+
+데이터베이스가 있으면 서버는 코치 요청을 모두 저장하고 모드를 데이터베이스에서 읽는다. 없으면 둘 다 꺼지고 앱은 이전처럼 동작한다. 계약은 `design.md`(모드와 요청 로그, 어드민 API)에 있다.
+
+- **데이터베이스 주소:** `COACH_LOG_DATABASE_URL`, 없으면 `DATABASE_URL`, 없으면 `POSTGRES_URL`. 로컬에서는 `.env`의 `DATABASE_URL`(Docker Postgres)을 추가 작업 없이 쓴다. 서버는 시작할 때 `coach_request_log`, `coach_settings`, `coach_mode_changes`가 없으면 만든다. `frontend/sql/request_log.sql`에 같은 SQL이 있다.
+- **실제 모드:** 데이터베이스의 `coach_system` 설정, 없으면 `COACH_SYSTEM`, 없으면 `agent`. 10초 동안 캐시하며, 데이터베이스 오류 때는 `COACH_SYSTEM`으로 돌아간다. `GET /admin/mode`는 모드, 출처(`db` 또는 `env`), 전환 기록을 보여 준다.
+- **어드민 토큰:** 선택 사항이다. `COACH_ADMIN_TOKEN`을 설정하면 `POST /admin/mode`에 `X-Admin-Token` 헤더가 필요하다. 보기는 계속 공개다.
+- **공개 데이터:** 질문은 원문 그대로 저장되고 `/admin`은 보호가 없으므로, 주소를 아는 사람은 누구나 읽을 수 있다. 행은 지울 때까지 남는다.
+
+| 저장되는 열 | 뜻 |
+|---|---|
+| `id`, `created_at` | 행 번호와 저장 시각 |
+| `mode`, `mode_source`, `transport` | `agent` 또는 `baseline`; `db` 또는 `env`; `ndjson` 또는 `json` |
+| `status`, `error_code` | stdout 로그 줄과 같음 |
+| `question` | 원문 그대로의 질문 전체 |
+| `quick_ms`, `first_ms`, `total_ms` | 첫 단계 시간; `first` 줄까지의 시간(없으면 `null`); 끝까지의 시간 |
+| `llm_calls`, `searches`, `input_tokens`, `output_tokens` | stdout 로그 줄과 같음 |
+| `verified_first`, `added_final`, `verified_final`, `continuation` | stdout 로그 줄과 같음 |
+| `result` | 답의 표현과 trace가 든 JSON. `/admin`이 이것으로 요청 로그와 실행 그래프를 만든다 |
+
+```sh
+curl -s 'http://127.0.0.1:8787/admin/requests.json?limit=20'
+curl -s http://127.0.0.1:8787/admin/mode
+curl -s -X POST -H 'Content-Type: application/json' -H "X-Admin-Token: $COACH_ADMIN_TOKEN" \
+  -d '{"mode": "baseline"}' http://127.0.0.1:8787/admin/mode
+```
+
+### 책임자의 Vercel 설정(Neon 무료)
+
+무료 Hobby 플랜은 멤버를 초대할 수 없으므로, 프로젝트 책임자가 Vercel 대시보드에서 한 번 진행한다.
+
+1. 프로젝트 → **Integrations** → **Browse Marketplace** → **Neon** → **Install**.
+2. **Free** 플랜을 고르고 데이터베이스를 만들어 이 프로젝트에 연결한다.
+3. **Settings → Environment Variables**에서 Neon이 추가한 변수 이름을 확인한다. `DATABASE_URL`이나 `POSTGRES_URL`은 그대로 쓰인다. 필요하면(예: 그 이름을 다른 용도로 쓰고 있으면) 같은 연결 문자열로 `COACH_LOG_DATABASE_URL`을 추가한다.
+4. 선택: `COACH_ADMIN_TOKEN`을 추가한다(`design.md` 판단 질문 R2).
+5. **Redeploy**. 새 변수는 새 배포에만 적용된다.
+6. 확인: `GET /admin/mode`가 `"writable": true`를 보여 주고, 질문 하나를 한 뒤 `GET /admin/requests.json`에 그 요청이 보인다.
+
+로컬에서는 할 일이 없다. `.env`의 Docker Postgres를 쓴다.
 
 ## 프로젝트 책임자 판단 질문
 
 1. 백그라운드 검색 중에는 새 코치 질문이 기다린다. 서버가 프로세스당 요청 하나만 처리해서, 보내면 busy로 거절되기 때문이다. 이 기본값을 유지할까요, 아니면 질문을 보내게 하고 가끔 나오는 busy 응답을 감수할까요?
 2. 잠금 재평가 실행으로 만든 `frontend/admin/data.json`을 커밋할까요? 약 3 MB이고 평가 질문 원문이 그대로 들어 있습니다. 커밋하면 어느 기기에서나 같은 `/admin`을 패키징할 수 있습니다. 커밋하지 않으면 패키징할 때 git이 무시하는 결과 폴더에서 만들어야 하는데, 그 폴더는 한 기기에만 있습니다. 추천: 그 파일 하나만 커밋한다.
+3. **책임자 작업:** **책임자의 Vercel 설정**대로 Neon을 연결합니다. 그전까지 배포된 앱은 stdout 로그 줄만 남기고, `/admin`은 모드를 바꿀 수 없습니다. `COACH_ADMIN_TOKEN` 설정 여부와 저장된 질문의 보관 기간은 `design.md`의 판단 질문 R2, R3에 있습니다.

@@ -92,12 +92,14 @@ export const isNotice = r => r.status === "ok" && (r.verified_first === 1 || r.v
 export const isWait0 = r => r.status === "ok" && r.verified_first === 0;
 export const noEx = r => r.status === "declined" || (r.status === "error" && r.error_phase !== "continuation");
 export const contKey = r => (r.status === "error" && r.error_phase === "continuation" ? "stop" : r.continuation);
-export const lockApplied = () => D.meta.lock.applied === true;
+/* 잠금 적용 여부: 실제 요청(r.live)은 지금 서버 코드(D1 고정 · 추가만)라 항상 적용, 평가 기록은 meta.lock.applied */
+export const lockApplied = r => (r != null && r.live === true) || D.meta.lock.applied === true;
 /* 잠금 규칙에 어긋나는 기록을 부르는 말: 잠금 적용 기록이면 '잠금 위반', 아니면 '잠금 전 기록' */
-export const lockWord = () => t(lockApplied() ? "data.lock.violation" : "data.lock.preLock");
+export const lockWord = r => t(lockApplied(r) ? "data.lock.violation" : "data.lock.preLock");
 /* 먼저 보냈다가 최종 답에서 빠진 예문(answers.first 중 verified && !in_final) */
 export const lostFirst = A => (A ? A.first.filter(f => f.verified && !f.in_final) : []);
-export const spansOf = id => (D.traces && D.traces[id]) || [];
+export const spansOf = id => LIVE.traces[id] || (D.traces && D.traces[id]) || [];
+export const answersOf = id => (D.answers && D.answers[id]) || LIVE.answers[id] || null;
 export const firstTok = id => sum(spansOf(id).filter(s => s.phase === "first" && s.tokens).map(s => s.tokens.total));
 export function firstVerified(spans) {
   const v = spans.find(s => s.stage === "validate_select_1");
@@ -131,6 +133,64 @@ export function getTraces() {
 export const tracesFailed = () => tracesErr != null;
 export function retryTraces() {
   tracesErr = null;
+}
+
+/* ---------- 실제 요청(서버의 requests.json, 상대 경로): 평가 기록과 따로 둔다 ----------
+   지표 · 모드 비교 탭은 평가 기록(D.requests)만 쓴다. 실제 요청 행은 REQ에도 넣어 실행 그래프에서 열 수 있게 한다.
+   state: idle → loading → ok(기록 켜짐) | off(서버에 DB 없음, enabled=false) | error(API 없음 · 형식 오류) */
+export const LIVE = { state: "idle", rows: [], traces: {}, answers: {}, err: null, at: null };
+let liveP = null;
+export function loadLive(force = false) {
+  if (force) liveP = null;
+  liveP ??= readJSON(fetch("requests.json?limit=300", { cache: "no-store" }), "requests.json")
+    .then(setLive)
+    .catch(e => {
+      Object.assign(LIVE, { state: "error", err: e });
+      liveP = null;
+    })
+    .then(() => LIVE);
+  if (LIVE.state !== "ok" && LIVE.state !== "off") LIVE.state = "loading";
+  return liveP;
+}
+const STATUSES = ["ok", "declined", "error"], CONTS = ["ran", "skipped", "none"];
+/* 서버 행을 화면이 쓰는 모양으로: 빠진 숫자는 0(선택 숫자는 null), 모르는 상태는 error, 후속은 none */
+function liveRow(r) {
+  if (!isObj(r) || !(typeof r.id === "string" || isNum(r.id))) return null;
+  const row = { ...r, id: String(r.id), live: true };
+  row.task_id = typeof r.task_id === "string" ? r.task_id : "";
+  row.attempt = isNum(r.attempt) ? r.attempt : 1;
+  if (!STATUSES.includes(row.status)) row.status = "error";
+  if (!CONTS.includes(row.continuation)) row.continuation = "none";
+  for (const k of NUMS) if (!isNum(row[k])) row[k] = 0;
+  for (const k of OPTIONAL_NUMS) if (!isNum(row[k])) row[k] = null;
+  const tk = isObj(r.tokens) ? r.tokens : {}, n = v => (isNum(v) ? v : 0);
+  row.tokens = { input: n(tk.input), output: n(tk.output), total: isNum(tk.total) ? tk.total : n(tk.input) + n(tk.output) };
+  if (typeof row.question !== "string") row.question = null;
+  return row;
+}
+const okSpan = s => isObj(s) && typeof s.id === "string" && typeof s.stage === "string" && isNum(s.start_ms) &&
+  isNum(s.elapsed_ms) && ["first", "continuation"].includes(s.phase) &&
+  (s.tokens == null || (isObj(s.tokens) && isNum(s.tokens.total)));
+function setLive(j) {
+  check(isObj(j) && (j.requests == null || Array.isArray(j.requests)), "requests.json");
+  if (j.schema_version !== 1) {
+    throw new DataError("data.err.liveVersion", { got: JSON.stringify(j.schema_version) ?? "—" });
+  }
+  for (const r of LIVE.rows) if (REQ.get(r.id) === r) REQ.delete(r.id);
+  const on = j.enabled !== false;
+  const rows = on ? (j.requests || []).map(liveRow).filter(Boolean) : [];
+  const traces = {}, answers = {};
+  for (const [id, spans] of Object.entries(isObj(j.traces) ? j.traces : {})) {
+    if (Array.isArray(spans)) traces[id] = spans.filter(okSpan);
+  }
+  for (const [id, a] of Object.entries(isObj(j.answers) ? j.answers : {})) {
+    if (isObj(a) && Array.isArray(a.first) && Array.isArray(a.final)) answers[id] = a;
+  }
+  rows.forEach((r, i) => {
+    if (!REQ.has(r.id)) REQ.set(r.id, r);
+    IDX.set(r, i); /* 기본 정렬 = 서버 순서(최신순) */
+  });
+  Object.assign(LIVE, { state: on ? "ok" : "off", rows, traces, answers, err: null, at: new Date().toISOString() });
 }
 
 /* ---------- 파생값 ---------- */

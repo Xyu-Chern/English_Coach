@@ -25,12 +25,24 @@ next model call or search. One request runs per process (coach_busy otherwise); 
 returned when the stream ends or the work ends, whichever is first.
 
 Each request that passes the access checks prints one JSON line to stdout (event=coach_request;
-fields in frontend/README.md). Nothing else about a request is stored.
+fields in frontend/README.md). With a database (frontend/request_log.py: COACH_LOG_DATABASE_URL >
+DATABASE_URL > POSTGRES_URL) the same request is also one coach_request_log row, written after the
+response has ended (a failed write changes nothing for the learner): the question (not the context),
+the log fields and the RunResult's trace and expressions.
+
+The mode a request runs in: coach_settings['coach_system'] > COACH_SYSTEM > agent, cached 10 s.
 
 GET /admin/ serves the admin page (frontend/admin/, open like the deployment's /admin, D4, with
 X-Robots-Tag: noindex) and /admin/data.json (+ data-traces.json) its data, built from an evaluation
 run by frontend/admin_data.py (D5). COACH_ADMIN_DIR swaps the page folder and COACH_ADMIN_DATA the
-data folder, so another design or another run can be previewed on another port.
+data folder, so another design or another run can be previewed on another port. Both deployments add:
+
+    GET  /admin/requests.json?limit=300  the logged requests, newest first, in data.json's request shape:
+         {"schema_version":1,"source":"live","enabled":bool,"requests":[...],"traces":{id:[spans]},
+          "answers":{id:{first,final}}} (+ "error":"database_unavailable" when the read failed)
+    GET  /admin/mode   {"mode","source":"db"|"env","updated_at","writable","token_required","history":[...]}
+    POST /admin/mode   {"mode":"baseline"|"agent"}; X-Admin-Token only when COACH_ADMIN_TOKEN is set.
+         200 as GET | 400 invalid_mode | 401 token_required | 409 no_database | 503 database_unavailable
 """
 import argparse
 import asyncio
@@ -41,6 +53,7 @@ import os
 import queue
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import lru_cache, partial
 from pathlib import Path
@@ -48,12 +61,16 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request
+import anyio
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
+from frontend.request_log import MAX_LIMIT, MODE_CACHE_SECONDS, MODES, ModeSwitch, RequestStore, StoreError
 from frontend.staged import CoachMode, Failed, Final, First, Guard, StagedCoach, is_terminal
 from translation_agent_demo.agents import CoachDependencies, SessionLimits
 from translation_agent_demo.agents.coach import _valid_input
@@ -160,11 +177,13 @@ def wants_ndjson(accept: str) -> bool:
     return False
 
 
-def log_record(mode: CoachMode, transport: str, question: str) -> dict:
+def log_record(mode: CoachMode, transport: str, question: str, mode_source: str = "env") -> dict:
     """The request log line's fields, before anything happened. Of the request it keeps only the
-    question's first characters, never the context or the answer (D2, D5: nothing else is stored)."""
+    question's first characters, never the context or the answer (D2, D5). mode_source: "db" when the
+    mode came from coach_settings, "env" from COACH_SYSTEM (or its default)."""
     return {"event": "coach_request", "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "request_id": str(uuid4()), "mode": mode.system, "continuation_setting": mode.continuation_setting,
+            "request_id": str(uuid4()), "mode": mode.system, "mode_source": mode_source,
+            "continuation_setting": mode.continuation_setting,
             "transport": transport, "status": None, "error_code": None, "verified_first": None,
             "added_final": None, "verified_final": None, "continuation": None, "invariant_ok": None,
             "first_ms": None, "total_ms": 0,
@@ -181,16 +200,18 @@ class Exchange:
     so only the stream has it: a JSON client sees nothing before total_ms."""
 
     def __init__(self, stream, question: str, mode: CoachMode, record: dict, *, clock, deadline_seconds: float,
-                 release, log):
+                 release, log, save=None):
         self.clock, self.record, self.log, self._release = clock, record, log, release
+        self.save = save  # save(record, result): the database row, written by persist() after the response
         self.streaming = record["transport"] == "ndjson"
         self.started = clock()
         self.deadline = self.started + deadline_seconds
         self.guard = Guard(self.deadline, clock)
         self.events: queue.Queue = queue.Queue()
         self.first: First | None = None  # the first answer, once given
+        self.result = None  # the terminal event's RunResult, when there was one
         self._lock = threading.Lock()
-        self._released = self._closed = False
+        self._released = self._closed = self._persisted = False
         threading.Thread(target=self._work, args=(stream, question, mode), name="coach-request", daemon=True).start()
 
     # ------------------------------------------------------- the coach's thread
@@ -228,6 +249,8 @@ class Exchange:
         """The line for one coach event (or _DONE); records it for the log."""
         if event is _DONE:
             return self.fail("coach_unavailable")
+        if getattr(event, "result", None) is not None:
+            self.result = event.result
         if isinstance(event, First):
             self.first = event
             sent = len(event.expressions)
@@ -311,11 +334,23 @@ class Exchange:
             self.record["status"] = "error"
         self.log(json.dumps(self.record, ensure_ascii=False))
 
+    def persist(self) -> None:
+        """Write the database row once, after close(); never raises (RequestStore.save does not)."""
+        with self._lock:
+            if self._persisted or not self._closed or self.save is None:
+                return
+            self._persisted = True
+        try:
+            self.save(self.record, self.result)
+        except Exception:
+            pass
+
 
 class StagedResponse(StreamingResponse):
     """The NDJSON response of one exchange. However the response ends, the exchange is closed: a client
     that leaves before the body starts never runs lines(), whose finally would close it, on either ASGI
-    disconnect path (spec 2.3: Starlette cancels the body; 2.4: the first send fails)."""
+    disconnect path (spec 2.3: Starlette cancels the body; 2.4: the first send fails). The database row is
+    written after that, when the stream has ended (shielded: a cancelled response still writes it)."""
 
     def __init__(self, exchange: Exchange):
         super().__init__(exchange.lines(), media_type=NDJSON,
@@ -327,6 +362,9 @@ class StagedResponse(StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             self.exchange.close(left=True)  # nothing when the stream already closed it
+            if self.exchange.save is not None:
+                with anyio.CancelScope(shield=True):
+                    await anyio.to_thread.run_sync(self.exchange.persist)
 
 
 def _print(line: str) -> None:
@@ -390,18 +428,94 @@ def serve_admin(app: FastAPI, page: Path, data: Path) -> None:
     app.mount("/admin", _Noindex(StaticFiles(directory=page, html=True)), name="admin")
 
 
+# ------------------------------------------------------------------ live requests and the mode switch
+def serve_live_admin(app: FastAPI, store: RequestStore, switch: ModeSwitch, fallback: str, origin: str) -> None:
+    """GET /admin/requests.json, GET and POST /admin/mode (frontend/request_log.py). Registered before the
+    /admin static mount, so they win over files of the same name."""
+    headers = {"Cache-Control": "no-store", **NOINDEX}
+
+    def refuse(status: int, code: str):
+        raise HTTPException(status, code, headers=headers)
+
+    def mode_view() -> dict:
+        current, source, updated_at = switch.current(fresh=True)
+        history = []
+        if store.enabled:
+            try:
+                history = store.history()
+            except StoreError:
+                pass
+        return {"mode": current, "source": source, "updated_at": updated_at, "writable": store.enabled,
+                "token_required": bool(os.environ.get("COACH_ADMIN_TOKEN", "")), "history": history}
+
+    @app.get("/admin/requests.json", include_in_schema=False)
+    def admin_requests(limit: int = Query(300, ge=1, le=MAX_LIMIT)):
+        payload = {"schema_version": 1, "source": "live", "enabled": store.enabled,
+                   "requests": [], "traces": {}, "answers": {}}
+        if store.enabled:
+            try:
+                rows = store.recent(limit)
+            except StoreError:
+                payload["error"] = "database_unavailable"
+            else:
+                from frontend.admin_data import live_payload  # here: an import problem must not stop the coach
+                payload.update(live_payload(rows))
+        return JSONResponse(payload, headers=headers)
+
+    @app.get("/admin/mode", include_in_schema=False)
+    def admin_mode():
+        return JSONResponse(mode_view(), headers=headers)
+
+    @app.post("/admin/mode", include_in_schema=False)
+    async def change_mode(request: Request, x_admin_token: str = Header(default="")):
+        token = os.environ.get("COACH_ADMIN_TOKEN", "")
+        if token and not hmac.compare_digest(token.encode(), x_admin_token.encode()):
+            refuse(401, "token_required")
+        if cross_site(request, origin):
+            refuse(403, "origin_denied")
+        try:
+            body = json.loads(await request.body() or b"null")
+        except ValueError:
+            body = None
+        value = body.get("mode") if isinstance(body, dict) else None
+        if not isinstance(value, str) or value not in MODES:
+            refuse(400, "invalid_mode")
+        if not store.enabled:
+            refuse(409, "no_database")
+        try:
+            await run_in_threadpool(store.set_mode, value, fallback)
+        except StoreError:
+            refuse(503, "database_unavailable")
+        switch.invalidate()
+        return JSONResponse(await run_in_threadpool(mode_view), headers=headers)
+
+
+def cross_site(request: Request, origin: str) -> bool:
+    """A browser request from a page that is neither this host nor an allowed web origin."""
+    browser_origin = request.headers.get("origin")
+    return bool(browser_origin) and (urlsplit(browser_origin).netloc != request.headers.get("host")
+                                     and browser_origin not in {"http://localhost", origin})
+
+
 # ------------------------------------------------------------------ the app
 def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_ui=True, public_access=False,
-             deadline_seconds: float = DEADLINE_SECONDS, log=None, clock=time.monotonic):
+             deadline_seconds: float = DEADLINE_SECONDS, log=None, clock=time.monotonic,
+             store: RequestStore | None = None, mode_cache_seconds: float = MODE_CACHE_SECONDS):
     """stream(question, mode, guard) -> events answers requests (the staged coach); answer(question) ->
     RunResult does instead, as one final answer; with neither, the local PostgreSQL index does.
 
     mode defaults to COACH_SYSTEM / COACH_CONTINUATION, read now: an unknown value stops the start. With
-    serve_ui, so are COACH_ADMIN_DIR / COACH_ADMIN_DATA (admin_folders)."""
+    serve_ui, so are COACH_ADMIN_DIR / COACH_ADMIN_DATA (admin_folders). store: the request log and mode
+    switch (RequestStore.from_environment() in both deployments); without one nothing is written and every
+    request runs in mode.system. Its tables are ensured now; a database that is down stops nothing."""
     mode = mode or CoachMode.from_environment()
     admin = admin_folders() if serve_ui else None
     stream = stream or (answering(answer) if answer is not None else local_stream)
     log = log or _print
+    store = store or RequestStore(None)
+    if store.enabled:
+        store.ensure()
+    switch = ModeSwitch(store, mode.system, ttl=mode_cache_seconds)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     origin = os.environ.get("COACH_WEB_ORIGIN", "").strip()
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", *([origin] if origin else [])],
@@ -411,7 +525,7 @@ def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_u
     limits = SessionLimits()
 
     @app.post("/api/search", response_model=Reply)
-    def search(body: Question, request: Request, x_coach_code: str = Header(default=""),
+    def search(body: Question, request: Request, background: BackgroundTasks, x_coach_code: str = Header(default=""),
                accept: str = Header(default="")):
         if not public_access:
             code = os.environ.get("COACH_PAIR_CODE", "")
@@ -421,34 +535,48 @@ def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_u
                 host = request.url.hostname
                 if host not in {"localhost", "127.0.0.1", "::1"}:
                     raise HTTPException(403, "pairing_required")
-        browser_origin = request.headers.get("origin")
-        if browser_origin and (urlsplit(browser_origin).netloc != request.headers.get("host")
-                               and browser_origin not in {"http://localhost", origin}):
+        if cross_site(request, origin):
             raise HTTPException(403, "origin_denied")
         q = body.question + ("\n" + body.context if body.context else "")
         streaming = wants_ndjson(accept)
-        record = log_record(mode, "ndjson" if streaming else "json", body.question)
+        system, source, _ = switch.current()
+        request_mode = mode if system == mode.system else replace(mode, system=system)
+        record = log_record(request_mode, "ndjson" if streaming else "json", body.question, source)
+        def save(row: dict, result=None) -> None:
+            store.save(row, body.question, result)  # the question only, never the context
+
+        save = save if store.enabled else None
+
+        def refused(status: int, code: str, state: str):
+            """A request answered with an error before (or instead of) the coach: its log line, then its row."""
+            row = {**record, "status": state, "error_code": code}
+            log(json.dumps(row, ensure_ascii=False))
+            return JSONResponse({"detail": code}, status, background=BackgroundTask(save, row) if save else None)
+
         if not _valid_input(q, limits):
-            log(json.dumps({**record, "status": "invalid_input", "error_code": "invalid_input"}, ensure_ascii=False))
-            raise HTTPException(422, "invalid_input")
+            return refused(422, "invalid_input", "invalid_input")
         if not slot.acquire(blocking=False):
-            log(json.dumps({**record, "status": "busy", "error_code": "coach_busy"}, ensure_ascii=False))
-            raise HTTPException(429, "coach_busy")
+            return refused(429, "coach_busy", "busy")
         try:
-            exchange = Exchange(stream, q, mode, record, clock=clock, deadline_seconds=deadline_seconds,
-                                release=slot.release, log=log)
+            exchange = Exchange(stream, q, request_mode, record, clock=clock, deadline_seconds=deadline_seconds,
+                                release=slot.release, log=log, save=save)
         except Exception:
             slot.release()
-            log(json.dumps({**record, "status": "error", "error_code": "coach_unavailable"}, ensure_ascii=False))
-            raise HTTPException(503, "coach_unavailable") from None
+            return refused(503, "coach_unavailable", "error")
         if streaming:
             return StagedResponse(exchange)
+        after = BackgroundTask(exchange.persist) if save else None
         try:
-            return exchange.reply()
-        except HTTPException:
-            raise
+            reply = exchange.reply()
+        except HTTPException as exc:
+            return JSONResponse({"detail": exc.detail}, exc.status_code, background=after)
         except Exception:
-            raise HTTPException(503, "coach_unavailable") from None
+            return JSONResponse({"detail": "coach_unavailable"}, 503, background=after)
+        if save:
+            background.add_task(exchange.persist)
+        return reply
+
+    serve_live_admin(app, store, switch, mode.system, origin)
 
     @app.get("/downloads/PhraseRoom.apk")
     def android_package():
@@ -496,10 +624,12 @@ if __name__ == "__main__":
     parser = args.parser
     if args.host != "localhost" and not ipaddress.ip_address(args.host).is_loopback and not os.environ.get("COACH_PAIR_CODE"):
         parser.error("Set COACH_PAIR_CODE before listening on a network interface.")
+    request_store = RequestStore.from_environment(env_file=Path(__file__).resolve().parents[1] / "translation_agent_demo" / ".env")
     try:
-        application = make_app(deadline_seconds=args.deadline)
+        application = make_app(deadline_seconds=args.deadline, store=request_store)
     except ValueError as exc:  # an unknown COACH_SYSTEM or COACH_CONTINUATION, or a missing admin folder
         parser.error(str(exc))
+    print(f"request log: {'on (PostgreSQL)' if request_store.enabled else 'off (no database URL)'}", flush=True)
     if args.deadline != DEADLINE_SECONDS:
         print(f"deadline: {args.deadline:g} s per request", flush=True)
     if application.state.admin:

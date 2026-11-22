@@ -7,7 +7,10 @@ public/        static files: the web app at /, the APK at /downloads/, the admin
                /admin/ with its data.json (+ data-traces.json when split). Open, like the app (D4).
 api/search.py  the function (frontend/vercel/index.py) with the Python files, corpus/ and encoder/ it reads.
 vercel.json    the function's limits and files, /admin -> /admin/ (the page reads data.json relatively), and
-               X-Robots-Tag: noindex on /admin and everything under it.
+               X-Robots-Tag: noindex on /admin and everything under it. /admin/requests.json and /admin/mode
+               (the live request log and the mode switch, frontend/request_log.py) are rewritten to the
+               function, which sees the original path. The database driver (psycopg) comes from
+               translation_agent_demo/requirements.txt.
 
 The admin data is an evaluation run's record (D5), built by frontend.admin_data from --admin-run (or
 COACH_ADMIN_RUN) under --admin-results (or COACH_ADMIN_RESULTS, default evaluation/results), in the
@@ -37,6 +40,20 @@ ADMIN = ROOT / "frontend/admin"
 DATA_FILES = (admin_data.DATA_FILE, admin_data.TRACES_FILE)
 FUNCTION_DIRS = ("corpus", "encoder", "translation_agent_demo", "frontend", "evaluation")
 ADMIN_PATHS = ("/admin", "/admin/(.*)")  # what vercel.json marks X-Robots-Tag: noindex
+LIVE_ADMIN_PATHS = ("/admin/requests.json", "/admin/mode")  # answered by the function (frontend/server.py)
+# The Python files the function needs beyond translation_agent_demo/ (copied whole) and its entry point.
+FUNCTION_FILES = (
+    "frontend/server.py",
+    "frontend/staged.py",
+    "frontend/request_log.py",
+    "frontend/sql/request_log.sql",
+    "frontend/admin_data.py",
+    "frontend/vercel/coach.py",
+    "evaluation/__init__.py",
+    "evaluation/snapshot_search.py",
+    "evaluation/report.py",
+    "evaluation/viewer.py",
+)
 
 
 def export_corpus(directory):
@@ -132,6 +149,8 @@ def vercel_config():
         },
         # The admin page fetches data.json relative to itself: /admin must become /admin/.
         "redirects": [{"source": "/admin", "destination": "/admin/", "permanent": False}],
+        # The live request log and the mode switch are the function's (it routes on the original path).
+        "rewrites": [{"source": source, "destination": "/api/search"} for source in LIVE_ADMIN_PATHS],
         # /admin is open to anyone with the address (D4) but kept out of search engines, its data included.
         "headers": [{"source": source, "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
                     for source in ADMIN_PATHS],
@@ -194,12 +213,7 @@ def main(argv=None):
     for d in ("", "agents", "corpus", "storage", "tools", "providers"):
         for p in (demo / d).glob("**/*.py" if d else "*.py"):
             copy(p, p.relative_to(ROOT))
-    for name in (
-        "frontend/server.py",
-        "frontend/staged.py",
-        "frontend/vercel/coach.py",
-        "evaluation/snapshot_search.py",
-    ):
+    for name in FUNCTION_FILES:
         copy(ROOT / name, name)
     copy(ROOT / "frontend/vercel/index.py", "api/search.py")
     for p in (ROOT / "frontend/web").iterdir():
