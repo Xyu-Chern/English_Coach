@@ -33,7 +33,10 @@ def package():
     for name in (
         "frontend/server.py",
         "frontend/staged.py",
-        "frontend/quick.py",
+        "frontend/request_log.py",
+        "frontend/sql/request_log.sql",
+        "frontend/audio_align.py",
+        "frontend/admin_data.py",
         "frontend/requirements.txt",
         "translation_agent_demo/requirements.txt",
         "translation_agent_demo/requirements-local.txt",

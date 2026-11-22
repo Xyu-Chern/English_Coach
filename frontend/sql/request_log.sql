@@ -1,4 +1,4 @@
--- The live request log and the coach mode switch (frontend/request_log.py).
+-- The live request log, the coach mode switch and the daily request cap (frontend/request_log.py).
 -- The server runs this file when it starts; every statement is safe to run again.
 -- One row per answered or refused POST /api/search, written after the response ends.
 -- question is the learner's question only (never the context); result keeps the RunResult's trace,
@@ -41,4 +41,12 @@ CREATE TABLE IF NOT EXISTS coach_mode_changes (
     at          timestamptz NOT NULL DEFAULT now(),
     from_mode   text,
     to_mode     text NOT NULL
+);
+
+-- COACH_DAILY_LIMIT: POST /api/search requests counted per day (COACH_DAILY_TZ, default Asia/Seoul), for all
+-- learners together; one INSERT ... ON CONFLICT DO UPDATE ... RETURNING count per request. Refused requests over
+-- the cap count too, so count can pass the cap.
+CREATE TABLE IF NOT EXISTS coach_daily_usage (
+    day         date PRIMARY KEY,
+    count       integer NOT NULL
 );

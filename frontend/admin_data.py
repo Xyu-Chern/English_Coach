@@ -5,17 +5,12 @@
         [--systems baseline,agent] [--coach-system baseline|agent] [--max-bytes 4000000] \\
         [--split-traces auto|always|never]
 
-Reads   <results>/<run>/manifest.json, <run>/<system>/attempts.jsonl for each system, <run>/grades/grades.jsonl
-        (+ grades/manifest.json), <run>/unit-starts.jsonl (optional) and the task file.
-Writes  <out>/data.json, plus <out>/data-traces.json when the traces are split out (data.json over --max-bytes,
-        or --split-traces always). Pages fetch both with relative URLs: fetch("data.json"), then
-        meta.files.traces when data.traces is null.
-
-One request here is one recorded attempt (task x attempt x system), not a learner request: the deployment keeps
-no request store. The first stage is the spans marked details.shared (else the spans up to validate_select_1 or
-decline) and verified_first is validate_select_1.details.verified. Records made before the verified-slot lock
-stay as recorded; meta.lock says, from the traces themselves, whether the lock was applied. Pass marks are the
-LLM judge's (3-vote majority), not human labels. No model, network or database calls.
+Reads <run>/manifest.json, <run>/<system>/attempts.jsonl, <run>/grades/{grades.jsonl,manifest.json},
+<run>/unit-starts.jsonl (optional) and the task file; writes <out>/data.json, plus data-traces.json when the traces
+move out (over --max-bytes, or --split-traces always: pages then fetch meta.files.traces). One request is one
+recorded attempt (task x attempt x system). The first stage is the spans marked details.shared (else up to
+validate_select_1 or decline); meta.lock says, from the traces, whether the verified-slot lock was applied. Pass
+marks are the LLM judge's (3-vote majority). live_payload converts the server's request log rows the same way.
 """
 
 from __future__ import annotations
@@ -23,15 +18,16 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from datetime import timedelta
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import sys
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from evaluation.report import mean, nearest_rank, read_jsonl
 from evaluation.viewer import show_name, stage_info
@@ -46,6 +42,18 @@ FINAL_TURN = 4  # pick_final and its steps come after the agent's 3 turns
 RUN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 TEXT, NOTE, ASSESSMENT, QUOTE, SNIPPET = 120, 200, 240, 220, 160  # characters kept in compact details
 NO_WORK = {"assemble", "continuation_skipped", "budget_exhausted"}  # after the first stage, not continuation work
+# The detail keys of a stage detail_of has no branch for; an unknown stage keeps only its error_code
+OTHER_DETAIL_KEYS = {"budget_exhausted": ("code",), "continuation_skipped": ("verified",)}
+# Never in a written admin file (write() stops instead): secret-like values and absolute local home paths
+LEAK_PATTERNS = {name: re.compile(pattern) for name, pattern in {
+    "an Anthropic key (sk-ant-)": r"\bsk-ant-[A-Za-z0-9_-]{8,}",
+    "an API key (sk-)": r"\bsk-[A-Za-z0-9_-]{16,}",
+    "a Google API key (AIza)": r"\bAIza[0-9A-Za-z_-]{20,}",
+    "a GitHub token (ghp_)": r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})",
+    "a PEM block (-----BEGIN)": r"-----BEGIN",
+    "a database URL with a password": r"\bpostgres(?:ql)?://[^\s:/@\"']+:[^\s/@\"']+@",
+    "a local home path": r"(?<![\w.-])/(?:Users|home)/[^/\s\"'\\]+/|\b[A-Za-z]:(?:\\)+Users(?:\\)+",
+}.items()}
 
 MODE_TEXT = {
     "baseline": ("Baseline · 고정 워크플로",
@@ -77,246 +85,79 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Tokens(Model):
-    input: int = Field(ge=0)
-    output: int = Field(ge=0)
-    total: int = Field(ge=0)
+def contract(name: str, base: type[BaseModel] = Model, **fields) -> type[BaseModel]:
+    """A model whose fields are all required, in this order."""
+    return create_model(name, __base__=base, **{key: (kind, ...) for key, kind in fields.items()})
 
 
-class Span(Model):
-    id: str
-    stage: str
-    label: str
-    kind: Literal["llm", "search", "verify", "decision", "assemble", "decline", "budget", "noop"]
-    phase: Literal["first", "continuation"]
-    turn: int | None
-    start_ms: int = Field(ge=0)
-    elapsed_ms: int = Field(ge=0)
-    status: Literal["ok", "error", "skipped", "noop"]
-    locked: bool
-    tokens: Tokens | None
-    summary: str
-    detail: dict[str, Any]
-
-
-class Request(Model):
-    id: str
-    key: str
-    task_id: str
-    attempt: int
-    category: str | None
-    language: str | None
-    expect: str | None
-    question: str | None
-    mode: Literal["baseline", "agent"]
-    system: str
-    status: Literal["ok", "declined", "error"]
-    error_code: str | None
-    error_phase: Literal["first", "continuation"] | None
-    decline_note: str | None
-    started_at: str | None
-    recorded_at: str | None
-    first_stage_ms: int | None
-    first_response_ms: int = Field(ge=0)
-    total_ms: int = Field(ge=0)
-    background_ms: int = Field(ge=0)
-    tokens: Tokens
-    llm_calls: int = Field(ge=0)
-    searches: int = Field(ge=0)
-    verified_first: int | None
-    verified_final: int | None
-    added_final: int = Field(ge=0)
-    lost_first: int = Field(ge=0)
-    continuation: Literal["skipped", "ran", "none"]
-    locked_noops: int = Field(ge=0)
-    passed: bool | None
-    strict_passed: bool | None
-    grounded_good: int | None
-    cost_usd: float | None
-
-
-class FirstItem(Model):
-    slot: int
-    status: str
-    verified: bool
-    in_final: bool
-    expression: str
-    key_phrase: str | None
-    note: str | None
-    quote: str | None
-    episode: str | None
-
-
-class FinalItem(Model):
-    expression: str
-    key_phrase: str | None
-    note: str | None
-    quote: str | None
-    episode: str | None
-    show: str | None
-    verified: bool
-    added: bool
-    from_first: bool
-
-
-class Answer(Model):
-    first: list[FirstItem]
-    final: list[FinalItem]
-
-
-class Dist(Model):
-    n: int
-    mean: float | None
-    p50: int | None
-    p95: int | None
-    p99: int | None
-    min: int | None
-    max: int | None
-
-
-class Rate(Model):
-    passed: int
-    n: int
-    rate: float | None
-
-
-class ModeAggregate(Model):
-    requests: int
-    status: dict[str, int]
-    continuation: dict[str, int]
-    verified_first: dict[str, int]
-    first_response_ms: Dist
-    first_stage_ms: Dist
-    total_ms: Dist
-    background_ms: Dist
-    tokens_total: Dist
-    cost_usd_total: float | None
-    passed: Rate
-    strict_passed: Rate
-    added_final_total: int
-    lost_first_requests: int
-    locked_noops: int
-
-
-class Aggregates(Model):
-    rule: str
-    by_mode: dict[str, ModeAggregate]
-
-
-class ModeDescription(Model):
-    label: str
-    description: str
-
-
-class ModeInfo(Model):
-    current: Literal["baseline", "agent"]
-    source: Literal["env", "cli", "default"]
-    env_var: str
-    allowed: list[str]
-    default: str
-    change_hint: str
-    modes: dict[str, ModeDescription]
-
-
-class RunInfo(Model):
-    id: str
-    date: str | None
-    started_at: str | None
-    finished_at: str | None
-    model: str | None
-    effort: str | None
-    embedding_model: str | None
-    embedding_dimensions: int | None
-    snapshot_id: str | None
-    tasks: int
-    repeats: int | None
-    systems: list[str]
-    requests: int
-    judge_model: str | None
-    judge_protocol: str | None
-    judge_votes: int | None
-    commit: str | None
-    derived_from: str | None
-    pricing_as_of: str | None
-
-
-class LockInfo(Model):
-    applied: bool | None
-    basis: Literal["trace", "manifest", "none"]
-    note: str
-    agent_requests: int
-    locked_noops: int
-    continuation_skipped: int
-    ran_with_all_verified: int
-    lost_first_requests: int
-
-
-class Files(Model):
-    data: str
-    traces: str | None
-
-
-class Meta(Model):
-    schema_version: Literal[1]
-    generated_at: str
-    generator: str
-    source: str
-    run: RunInfo
-    lock: LockInfo
-    files: Files
-    answers_scope: Literal["all"]
-    example_rules: dict[str, str]
-    notes: list[str]
-    warnings: list[str]
-    inputs: dict[str, str]
-
-
-class Examples(Model):
-    baseline: str | None
-    agent: str | None
-    skipped: str | None
-
-
-class AdminData(Model):
-    meta: Meta
-    mode: ModeInfo
-    requests: list[Request]
-    traces: dict[str, list[Span]] | None
-    answers: dict[str, Answer]
-    examples: Examples
-    aggregates: Aggregates
-
-
-class TracesFile(Model):
-    schema_version: Literal[1]
-    run: str
-    traces: dict[str, list[Span]]
+Count, Text, Number, Flag = Annotated[int, Field(ge=0)], str | None, int | None, bool | None
+Mode, Phase = Literal["baseline", "agent"], Literal["first", "continuation"]
+Tokens = contract("Tokens", input=Count, output=Count, total=Count)
+Span = contract("Span", id=str, stage=str, label=str,
+                kind=Literal["llm", "search", "verify", "decision", "assemble", "decline", "budget", "noop"],
+                phase=Phase, turn=Number, start_ms=Count, elapsed_ms=Count,
+                status=Literal["ok", "error", "skipped", "noop"], locked=bool, tokens=Tokens | None, summary=str,
+                detail=dict[str, Any])
+Request = contract(
+    "Request", id=str, key=str, task_id=str, attempt=int, category=Text, language=Text, expect=Text, question=Text,
+    mode=Mode, system=str, status=Literal["ok", "declined", "error"], error_code=Text, error_phase=Phase | None,
+    decline_note=Text, started_at=Text, recorded_at=Text, first_stage_ms=Number, first_response_ms=Count,
+    total_ms=Count, background_ms=Count, tokens=Tokens, llm_calls=Count, searches=Count, verified_first=Number,
+    verified_final=Number, added_final=Count, lost_first=Count, continuation=Literal["skipped", "ran", "none"],
+    locked_noops=Count, passed=Flag, strict_passed=Flag, grounded_good=Number, cost_usd=float | None)
+FirstItem = contract("FirstItem", slot=int, status=str, verified=bool, in_final=bool, expression=str,
+                     key_phrase=Text, note=Text, quote=Text, episode=Text)
+FinalItem = contract("FinalItem", expression=str, key_phrase=Text, note=Text, quote=Text, episode=Text, show=Text,
+                     verified=bool, added=bool, from_first=bool)
+Answer = contract("Answer", first=list[FirstItem], final=list[FinalItem])
+Dist = contract("Dist", n=int, mean=float | None, p50=Number, p95=Number, p99=Number, min=Number, max=Number)
+Rate = contract("Rate", passed=int, n=int, rate=float | None)
+ModeAggregate = contract(
+    "ModeAggregate", requests=int, status=dict[str, int], continuation=dict[str, int], verified_first=dict[str, int],
+    first_response_ms=Dist, first_stage_ms=Dist, total_ms=Dist, background_ms=Dist, tokens_total=Dist,
+    cost_usd_total=float | None, passed=Rate, strict_passed=Rate, added_final_total=int, lost_first_requests=int,
+    locked_noops=int)
+ModeInfo = contract("ModeInfo", current=Mode, source=Literal["env", "cli", "default"], env_var=str, allowed=list[str],
+                    default=str, change_hint=str,
+                    modes=dict[str, contract("ModeDescription", label=str, description=str)])
+RunInfo = contract(
+    "RunInfo", id=str, date=Text, started_at=Text, finished_at=Text, model=Text, effort=Text, embedding_model=Text,
+    embedding_dimensions=Number, snapshot_id=Text, tasks=int, repeats=Number, systems=list[str], requests=int,
+    judge_model=Text, judge_protocol=Text, judge_votes=Number, commit=Text, derived_from=Text, pricing_as_of=Text)
+LockInfo = contract("LockInfo", applied=Flag, basis=Literal["trace", "manifest", "none"], note=str, agent_requests=int,
+                    locked_noops=int, continuation_skipped=int, ran_with_all_verified=int, lost_first_requests=int)
+Meta = contract("Meta", schema_version=Literal[1], generated_at=str, generator=str, source=str, run=RunInfo,
+                lock=LockInfo, files=contract("Files", data=str, traces=Text), answers_scope=Literal["all"],
+                example_rules=dict[str, str], notes=list[str], warnings=list[str], inputs=dict[str, str])
+AdminData = contract("AdminData", meta=Meta, mode=ModeInfo, requests=list[Request],
+                     traces=dict[str, list[Span]] | None, answers=dict[str, Answer],
+                     examples=contract("Examples", baseline=Text, agent=Text, skipped=Text), aggregates=contract(
+                         "Aggregates", rule=str, by_mode=dict[str, ModeAggregate]))
+TracesFile = contract("TracesFile", schema_version=Literal[1], run=str, traces=dict[str, list[Span]])
+# A live request (GET /admin/requests.json): data.json's request plus what only the server's log row has.
+LiveRequest = contract("LiveRequest", Request, transport=Literal["json", "ndjson"] | None,
+                       mode_source=Literal["db", "env"] | None, quick_ms=Number)
 
 
 # ---------- small helpers ----------
 
 def short(text, n: int) -> str | None:
-    if text is None:
-        return None
-    text = " ".join(str(text).split())
-    return text if len(text) <= n else text[:n - 1] + "…"
+    text = None if text is None else " ".join(str(text).split())
+    return text if text is None or len(text) <= n else text[:n - 1] + "…"
 
 
 def ms(value) -> int:
     return max(0, int(round(value or 0)))
 
 
-def compact(detail: dict) -> dict:
-    """Keys without a value are left out: details stay small."""
+def compact(detail: dict) -> dict:  # keys without a value are left out: details stay small
     return {k: v for k, v in detail.items() if v is not None}
 
 
 def mode_of(system: str) -> str:
-    if system == "baseline":
-        return "baseline"
-    if system.startswith("agent"):
-        return "agent"
-    raise ValueError(f"Unknown system {system!r}: expected baseline or agent*")
+    if system != "baseline" and not system.startswith("agent"):
+        raise ValueError(f"Unknown system {system!r}: expected baseline or agent*")
+    return "baseline" if system == "baseline" else "agent"
 
 
 def resolve_mode(cli_value: str | None, environ=os.environ) -> tuple[str, str]:
@@ -333,16 +174,16 @@ def resolve_mode(cli_value: str | None, environ=os.environ) -> tuple[str, str]:
 
 
 def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
     with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(fh, "sha256").hexdigest()
+
+
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def details(span: dict) -> dict:
-    value = span.get("details")
-    return value if isinstance(value, dict) else {}
+    return span.get("details") if isinstance(span.get("details"), dict) else {}
 
 
 # ---------- one attempt ----------
@@ -391,18 +232,14 @@ def turn_of(stage: str, first: bool) -> int | None:
 
 
 def label_of(stage: str) -> str:
-    if stage == "continuation_skipped":
-        return "후속 단계 생략"
-    return stage_info(stage, "ko")[1]
+    return "후속 단계 생략" if stage == "continuation_skipped" else stage_info(stage, "ko")[1]
 
 
 def outcome_ko(outcome) -> str:
     if outcome is None:
         return "결과 없음"
     outcome = str(outcome)
-    if outcome.startswith("rejected:"):
-        return "거부: " + outcome.split(":", 1)[1]
-    return OUTCOME_KO.get(outcome, outcome)
+    return "거부: " + outcome.split(":", 1)[1] if outcome.startswith("rejected:") else OUTCOME_KO.get(outcome, outcome)
 
 
 def summarize(stage: str, status: str, d: dict, first: bool) -> str:
@@ -525,9 +362,11 @@ def detail_of(stage: str, d: dict, *, rich: bool, locked_slots: list[int] | None
             out.update(previous_expression=d.get("previous_expression"), rejection_reasons=d.get("rejection_reasons"))
     elif stage == "assemble":
         out.update(expressions=d.get("expressions"), with_example=d.get("with_example"))
-    else:
-        out.update({k: v for k, v in d.items()
-                    if k not in ("shared", "started_ms") and not isinstance(v, (dict, list))})
+    else:  # only the listed keys: a field added to the trace later is not published unreviewed
+        for key in OTHER_DETAIL_KEYS.get(stage, ()):
+            value = d.get(key)
+            if not isinstance(value, (dict, list)):
+                out[key] = short(value, TEXT) if isinstance(value, str) else value
     return compact(out)
 
 
@@ -695,9 +534,7 @@ def aggregates(requests: list[dict]) -> dict:
             "status": {s: sum(r["status"] == s for r in rows) for s in ("ok", "declined", "error")},
             "continuation": {c: sum(r["continuation"] == c for r in rows) for c in ("skipped", "ran", "none")},
             "verified_first": {str(k): sum(r["verified_first"] == k for r in ok) for k in range(4)},
-            "first_response_ms": dist([r["first_response_ms"] for r in ok]),
-            "first_stage_ms": dist([r["first_stage_ms"] for r in ok]),
-            "total_ms": dist([r["total_ms"] for r in ok]),
+            **{field: dist([r[field] for r in ok]) for field in ("first_response_ms", "first_stage_ms", "total_ms")},
             "background_ms": dist([r["background_ms"] for r in ok if r["verified_first"] in (1, 2)]),
             "tokens_total": dist([r["tokens"]["total"] for r in ok]),
             "cost_usd_total": round(sum(costs), 6) if costs else None,
@@ -718,12 +555,11 @@ def choose_examples(requests: list[dict], order: dict) -> dict:
         units[(r["task_id"], r["attempt"])][r["mode"]] = r
     ordered = sorted(units, key=lambda u: (order.get(u[0], len(order)), u[0], u[1]))
 
-    def full(b, a):
-        return (b["verified_first"] in (1, 2) and b["continuation"] == "ran" and a["continuation"] == "ran"
-                and b["added_final"] >= 1 and a["added_final"] >= 1 and a["lost_first"] == 0)
-
     def ran(b, a):
         return b["verified_first"] in (1, 2) and b["continuation"] == "ran" and a["continuation"] == "ran"
+
+    def full(b, a):
+        return ran(b, a) and b["added_final"] >= 1 and a["added_final"] >= 1 and a["lost_first"] == 0
 
     out = {"baseline": None, "agent": None, "skipped": None}
     for condition in (full, ran, lambda b, a: True):
@@ -739,12 +575,8 @@ def choose_examples(requests: list[dict], order: dict) -> dict:
         if out[mode] is None:
             out[mode] = next((units[u][mode]["id"] for u in ordered
                               if mode in units[u] and units[u][mode]["status"] == "ok"), None)
-    for mode in ("agent", "baseline"):
-        found = next((units[u][mode]["id"] for u in ordered if mode in units[u]
-                      and units[u][mode]["status"] == "ok" and units[u][mode]["continuation"] == "skipped"), None)
-        if found:
-            out["skipped"] = found
-            break
+    out["skipped"] = next((units[u][mode]["id"] for mode in ("agent", "baseline") for u in ordered if mode in units[u]
+                           and units[u][mode]["status"] == "ok" and units[u][mode]["continuation"] == "skipped"), None)
     return out
 
 
@@ -781,10 +613,7 @@ def build(run_dir: Path, tasks_path: Path, *, mode: tuple[str, str] = (DEFAULT_M
           systems: list[str] | None = None, generated_at: datetime | None = None) -> dict:
     """The whole payload (traces inline). Pure apart from reading the run and task files."""
     run_dir, tasks_path = Path(run_dir), Path(tasks_path)
-    manifest_path = run_dir / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-    grades_manifest_path = run_dir / "grades" / "manifest.json"
-    judge = json.loads(grades_manifest_path.read_text(encoding="utf-8")) if grades_manifest_path.exists() else {}
+    manifest, judge = read_json(run_dir / "manifest.json"), read_json(run_dir / "grades" / "manifest.json")
     systems = list(systems or manifest.get("systems") or
                    sorted((p.parent.name for p in run_dir.glob("*/attempts.jsonl")), key=lambda s: s != "baseline"))
     if not systems:
@@ -801,9 +630,8 @@ def build(run_dir: Path, tasks_path: Path, *, mode: tuple[str, str] = (DEFAULT_M
     grades = {g["key"]: g for g in read_jsonl(run_dir / "grades" / "grades.jsonl")}
     starts = {(s["task_id"], s["attempt"]): s.get("started_at") for s in read_jsonl(run_dir / "unit-starts.jsonl")}
     inputs = {f"{s}/attempts.jsonl": sha256(run_dir / s / "attempts.jsonl") for s in systems}
-    for name in ("manifest.json", "grades/grades.jsonl", "grades/manifest.json", "unit-starts.jsonl"):
-        if (run_dir / name).is_file():
-            inputs[name] = sha256(run_dir / name)
+    inputs |= {name: sha256(run_dir / name) for name in ("manifest.json", "grades/grades.jsonl", "grades/manifest.json",
+                                                         "unit-starts.jsonl") if (run_dir / name).is_file()}
     inputs[f"tasks:{tasks_path.name}"] = sha256(tasks_path)
     warnings = []
     if manifest.get("tasks_sha256") and manifest["tasks_sha256"] != inputs[f"tasks:{tasks_path.name}"]:
@@ -897,16 +725,7 @@ def build(run_dir: Path, tasks_path: Path, *, mode: tuple[str, str] = (DEFAULT_M
 
 # ---------- live requests (frontend/request_log.py rows, for GET /admin/requests.json) ----------
 
-LIVE_STATUS = {"ok": "ok", "declined": "declined"}  # everything else (timeout, busy, disconnected...) is an error
 LIVE_CONTINUATION = {"ran": "ran", "skipped": "skipped", "off": "skipped"}  # off: nothing ran after the first stage
-
-
-class LiveRequest(Request):
-    """A live request: data.json's request shape plus what only the server's log row has (the admin page
-    shows them in the live list and detail)."""
-    transport: Literal["json", "ndjson"] | None
-    mode_source: Literal["db", "env"] | None
-    quick_ms: int | None
 
 
 def live_language(text: str | None) -> str | None:
@@ -922,27 +741,21 @@ def live_language(text: str | None) -> str | None:
 
 
 def live_request(row: dict) -> tuple[dict, list[dict], dict]:
-    """(request, spans, answer) for one coach_request_log row, in data.json's shapes (validated; the request
-    adds the row's transport, mode_source and quick_ms, LiveRequest).
-
-    Times, counts and tokens are the server's measures (first_response_ms = the stream's first_ms, else
-    total_ms); the trace, answers, lost_first and locked_noops come from the stored RunResult, as for an
-    evaluation attempt. Not graded: passed, strict_passed, grounded_good and cost_usd are null."""
-    from datetime import timedelta
+    """(request, spans, answer) for one coach_request_log row in data.json's shapes (validated). Times, counts
+    and tokens are the server's (first_response_ms = the stream's first_ms, else total_ms); the trace, answers,
+    lost_first and locked_noops come from the stored RunResult. Not graded: passed ... cost_usd are null."""
     rid = f"live-{row['id']}"
     mode = row.get("mode") if row.get("mode") in MODES else DEFAULT_MODE
     result = row.get("result") if isinstance(row.get("result"), dict) else {}
     f = attempt_facts({"result": result})
-    status = LIVE_STATUS.get(row.get("status"), "error")
+    status = row.get("status") if row.get("status") in ("ok", "declined") else "error"  # timeout, busy...: errors
     continuation = LIVE_CONTINUATION.get(row.get("continuation"), "none")
     total = ms(row.get("total_ms"))
     first_response = min(total, ms(row["first_ms"])) if row.get("first_ms") is not None else total
     created = row.get("created_at")
-    if isinstance(created, str):
-        created = datetime.fromisoformat(created)
-    recorded_at = created.astimezone(timezone.utc).isoformat(timespec="milliseconds") if created else None
-    started_at = ((created - timedelta(milliseconds=total)).astimezone(timezone.utc).isoformat(timespec="milliseconds")
-                  if created else None)
+    created = datetime.fromisoformat(created) if isinstance(created, str) else created
+    recorded_at, started_at = ((t.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+                                for t in (created, created - timedelta(milliseconds=total))) if created else (None, None))
     tin, tout = int(row.get("input_tokens") or 0), int(row.get("output_tokens") or 0)
     question = row.get("question")
     request = {
@@ -976,8 +789,7 @@ def live_request(row: dict) -> tuple[dict, list[dict], dict]:
 
 
 def live_payload(rows: list[dict]) -> dict:
-    """{"requests", "traces", "answers"} for rows in their order (newest first); a row that cannot be
-    converted is left out rather than failing the page."""
+    """{"requests", "traces", "answers"} in the rows' order; a row that cannot be converted is left out."""
     requests, traces, answers = [], {}, {}
     for row in rows:
         try:
@@ -995,6 +807,19 @@ def dumps(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def leaks(text: str) -> list[str]:
+    """What LEAK_PATTERNS finds in text, by name only (never the value)."""
+    return [name for name, pattern in LEAK_PATTERNS.items() if pattern.search(text)]
+
+
+def check_leaks(text: str) -> None:
+    """ValueError when text holds a secret-like value or a local home path: the build stops, nothing is written."""
+    found = leaks(text)
+    if found:
+        raise ValueError(f"the admin data would contain {', '.join(found)}; nothing was written. Remove it from "
+                         "the source records (or from what the generator copies) and build again.")
+
+
 def write_atomic(path: Path, text: str) -> int:
     data = text.encode("utf-8")
     temporary = path.with_name(path.name + ".tmp")
@@ -1004,12 +829,14 @@ def write_atomic(path: Path, text: str) -> int:
 
 
 def write(payload: dict, out: Path, *, max_bytes: int = MAX_BYTES, split: str = "auto") -> dict[str, int]:
-    """Write data.json (and data-traces.json when split); returns {file name: bytes}. data.json must fit max_bytes."""
+    """Write data.json (and data-traces.json when split); returns {file name: bytes}. data.json must fit max_bytes,
+    and the payload (both files' content) must pass check_leaks before anything is written."""
     if split not in SPLIT_CHOICES:
         raise ValueError(f"split must be one of {', '.join(SPLIT_CHOICES)}")
+    inline = dumps(payload)
+    check_leaks(inline)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    inline = dumps(payload)
     if split == "always" or (split == "auto" and len(inline.encode("utf-8")) > max_bytes):
         traces = TracesFile.model_validate({"schema_version": SCHEMA_VERSION, "run": payload["meta"]["run"]["id"],
                                             "traces": payload["traces"]}).model_dump(mode="json")

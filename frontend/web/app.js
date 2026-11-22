@@ -81,6 +81,9 @@ let notice = null;
 // The quick translation of the request in flight (PR5): {ticket, text, note}. A model's line sent
 // before any podcast check; it is generated, never a verified example.
 let quick = null;
+// The server's cap on questions per day for everyone (X-Coach-Daily-Limit / -Remaining): {limit,
+// left} from the last coach reply; null when the server has none.
+let daily = null;
 const running = new Set();
 const RUNNING_LIMIT = 1; // the server answers one request per process, so wait for the search to end
 const SLOW_SECONDS = 30; // after this the wait line says the examples take a little longer
@@ -266,7 +269,7 @@ function home() {
     (sendBlocked() ? "disabled" : "") +
     ">↑</button></div>" +
     '<p class="hold" id="hold">' +
-    (holding() ? holdText() : "") +
+    holdLine() +
     "</p></form>" +
     (mode === "coach" && staticOnly && !read("server", "")
       ? '<p class="cloud-pending" role="status">' +
@@ -296,6 +299,17 @@ function holdText() {
     "上一条的例句查找结束后即可发送",
     "앞 질문의 예문 찾기가 끝나면 보낼 수 있어요",
   );
+}
+function readDaily(r) {
+  const limit = parseInt(r.headers.get("X-Coach-Daily-Limit") || "", 10),
+    left = parseInt(r.headers.get("X-Coach-Daily-Remaining") || "", 10);
+  daily = limit >= 0 ? { limit, left: left >= 0 ? left : null } : null;
+}
+function holdLine() {
+  if (holding()) return holdText();
+  return mode === "coach" && daily && daily.left !== null
+    ? T("今天还可以提问 " + daily.left + " 次", "오늘 남은 질문 " + daily.left + "회")
+    : "";
 }
 // The quick translation (PR5) has its own label and no save button: it was generated before any
 // podcast check. Once verified examples arrive (done) it stays above them, smaller and muted.
@@ -377,7 +391,7 @@ function paintComposer() {
   const send = document.querySelector("#ask .send"),
     hold = $("hold");
   if (send) send.disabled = sendBlocked();
-  if (hold) hold.textContent = holding() ? holdText() : "";
+  if (hold) hold.textContent = holdLine();
 }
 // The live region speaks only when an answer arrives: the first examples and the end of the search.
 function say(text) {
@@ -1526,6 +1540,12 @@ function failedMessage() {
       "教练正在处理另一条提问，请稍后再试。",
       "다른 질문을 처리 중이에요. 잠시 후 다시 시도하세요.",
     ),
+    daily: daily
+      ? T(
+          "今天的提问次数（每天 " + daily.limit + " 次）已用完，请明天再试。",
+          "오늘 사용 가능한 질문 수(하루 " + daily.limit + "회)를 모두 썼어요. 내일 다시 시도해 주세요.",
+        )
+      : T("今天的提问次数已用完，请明天再试。", "오늘 사용 가능한 질문 수를 모두 썼어요. 내일 다시 시도해 주세요."),
     invalid: T("请缩短问题后再试。", "질문을 짧게 줄여 주세요."),
     timeout: T(
       "这次没能及时找到回答，请稍后再试。",
@@ -1829,6 +1849,7 @@ async function ask(resumeId = null, again = null) {
             referrerPolicy: "no-referrer",
             signal: stop.signal,
           });
+      if (r) readDaily(r);
       if (
         r &&
         r.ok &&
@@ -1866,6 +1887,16 @@ async function ask(resumeId = null, again = null) {
       ).detail === "coach_offline"
     )
       throw new Error("offline");
+    if (
+      r.status === 429 &&
+      (
+        await r
+          .clone()
+          .json()
+          .catch(() => ({}))
+      ).detail === "daily_limit"
+    )
+      throw new Error("daily");
     if (!r.ok)
       throw new Error(
         { 401: privateServer(apiBase()) ? "pair" : "service", 403: "service", 429: "busy", 422: "invalid" }[r.status] ||
@@ -1885,7 +1916,7 @@ async function ask(resumeId = null, again = null) {
           ? "timeout"
           : err.name === "SyntaxError"
             ? "service"
-            : ["pair", "busy", "invalid", "service", "offline", "timeout"].includes(
+            : ["pair", "busy", "daily", "invalid", "service", "offline", "timeout"].includes(
                 err.message,
               )
             ? err.message

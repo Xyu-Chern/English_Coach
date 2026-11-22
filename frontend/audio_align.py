@@ -1,36 +1,15 @@
-"""Where a cited passage plays in the publisher's audio: speech recognition aligns its chunk (PR⑥ v2).
+"""Where a cited passage plays in the publisher's audio: speech recognition aligns its chunk once and keeps it.
 
-Few transcripts carry timing (SRT: 1 feed of 27), so a citation's audio offset is usually estimated from
-its character position (translation_agent_demo/storage/episode_audio.py) and often plays the wrong minute.
-This module finds the chunk in the audio itself, once per chunk, and keeps the result:
+The character-position estimate (storage/episode_audio.py) may play the wrong minute, so align_chunk decodes the
+estimate's centre +-150 s of the remote enclosure (PyAV seeks; nothing is written), recognises its words
+(faster-whisper), matches them to the chunk's (difflib) and times every word, widening once where needed;
+stored_alignment uses SRT cue timing instead. AudioAlignments answers GET /api/audio/alignment from
+chunk_audio_alignment (migration 011), aligning in two background threads: "ready" (the saved alignment, or until
+then marker-timed lines with "confidence" and "refining"), "pending" (queued or running) or "unavailable" (failed
+in the last 10 minutes, impossible or off: the estimate, else nulls). COACH_AUDIO_ALIGN=on|off (on locally; needs
+faster-whisper and the database; the Vercel function reads corpus/alignments.json); COACH_ALIGN_MODEL (base.en).
 
-    align_chunk(source, decode, transcribe) -> Alignment | None
-        decode the estimate's centre +-150 s of the remote enclosure (PyAV seeks there; only that part is
-        fetched and nothing is written to disk), recognise its words with times (faster-whisper), match
-        them to the chunk's own words (difflib) and give every chunk word a time. When the chunk is not
-        (all) inside the window, it decodes once more on the side(s) that need it, then gives up (None).
-    stored_alignment(source)  a chunk whose transcript has cue timing (SRT) needs no audio: method "stored".
-    answer(row, quote)        GET /api/audio/alignment's ready answer: the quote's place from the saved
-                              word times and the lines (cues) around it, about 30-40 s.
-
-    AudioAlignments           the API's state for frontend/server.py: chunk_audio_alignment (migration 011)
-                              as the cache, a background queue run by two threads (the server adds the
-                              examples it has just shown, an asked-for chunk goes first) and the answers:
-        ready        the saved alignment (method "asr" or "stored"), or, until one exists, lines timed from
-                     the transcript's time markers (anchored_alignment: method "anchored", or "estimated"
-                     outside the markers; "confidence"; the quote's span widened ~3 s on each side;
-                     "refining": true while recognition runs, and the client keeps asking to replace them)
-        pending      queued or running without markers; the client asks again every 1-2 s (about 40 s at most)
-        unavailable  no alignment (none possible, failed in the last 10 minutes, or aligning is off):
-                     the estimate when the database knows it, else nulls (the client keeps its own)
-
-COACH_AUDIO_ALIGN=on|off: on is the local server's default and runs the recogniser (needs faster-whisper,
-translation_agent_demo/requirements-local.txt, and the database); the Vercel function is off and only
-reads the saved alignments the package put in corpus/alignments.json (frontend/vercel/package.py).
-COACH_ALIGN_MODEL picks the faster-whisper model (default base.en; tiny is smaller and faster).
-
-    python -m frontend.audio_align <chunk_id>... [--ids-file FILE] [--quote TEXT]
-        align and save chunks now (for a snapshot), one JSON line each.
+    python -m frontend.audio_align <chunk_id>... [--ids-file FILE] [--quote TEXT]   align and save chunks now
 """
 
 import argparse
@@ -40,55 +19,61 @@ import json
 import os
 import queue
 import re
-import sys
 import threading
 import time
+from bisect import bisect_left
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import cached_property
 from pathlib import Path
 from uuid import UUID
+
+import psycopg
+from psycopg.types.json import Jsonb
+
+from translation_agent_demo.storage.episode_audio import (
+    ANCHORED_LEAD_IN_MS, ANCHORED_TAIL_MS, AUDIO_POSITION_SQL, anchors_for_builds, chunk_to_document_offset,
+    estimate_clip, interpolate,
+)
+from translation_agent_demo.storage.postgres import CorpusStorageError, PostgresSettings, connect_database
+from translation_agent_demo.storage.retrieval import _display_url
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "translation_agent_demo/storage/migrations/011_chunk_audio_alignment.sql"
 SNAPSHOT = ROOT / "corpus" / "alignments.json"  # in the Vercel bundle, beside passages.json
-SETTING_CHOICES = ("on", "off")
-DEFAULT_MODEL = "base.en"
-SAMPLE_RATE = 16_000
-REACH_MS = 150_000  # the first window: the estimate's centre +- this much, at least...
-MARGIN_MS = 75_000  # ...and this much beyond the chunk's estimated ends
+SETTING_CHOICES, DEFAULT_MODEL, SAMPLE_RATE = ("on", "off"), "base.en", 16_000
+REACH_MS, MARGIN_MS = 150_000, 75_000  # first window: the estimate's centre +- REACH_MS, and MARGIN_MS past its ends
 WIDEN_MS = 210_000  # the one retry decodes this much more on each side that needs it
 EDGE_MS = 5_000  # a chunk guessed to start (end) this close to a window edge may lie beyond it
 MIN_COVERAGE = 0.35  # the share of the chunk's words that must match recognised words
 MS_PER_WORD = 350  # speech rate when there is nothing to measure it from
-MAX_LINE_WORDS = 16
-MIN_CLIP_MS, MAX_CLIP_MS = 30_000, 40_000
-WORKERS = 2  # alignments running at once
-MAX_JOBS = 24  # queued and running; more pre-alignments are dropped
+MAX_LINE_WORDS, MIN_CLIP_MS, MAX_CLIP_MS = 16, 30_000, 40_000
+WORKERS, MAX_JOBS = 2, 24  # alignments running at once; queued and running (more pre-alignments are dropped)
 FAILED_SECONDS = 600.0  # a failed chunk answers unavailable this long before it is tried again
 DECODE_SECONDS = 45.0  # the most one window's fetch and decode may take
 REMEMBERED = 512  # alignments and sources kept in memory
+ROW_KEYS = ("audio_url", "window_start_ms", "words", "cues", "method", "model")
 
 _WORD = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
 _SENTENCE_END = re.compile(r"(?<=[.!?…])[\"'”’)\]]*\s+")
 _BREAK = re.compile(r"[,;:—–]\s+")
+_TRIMMED = re.compile(r"\s*(.*?)\s*", re.S)
 
 
-# ------------------------------------------------------------------ words
 def words_of(text: str) -> list[tuple[str, int, int]]:
     """(word, start char, end char) of each word: letters and digits, with inner apostrophes."""
     return [(m.group(), m.start(), m.end()) for m in _WORD.finditer(text)]
 
 
 def word_key(word: str) -> str:
-    """How a word compares: lower case, without apostrophes ("Don't" and "dont" match)."""
+    """Lower case without apostrophes: "Don't" and "dont" match."""
     return word.lower().replace("’", "").replace("'", "")
 
 
 def heard_tokens(words: Iterable[tuple[str, int, int]]) -> list[tuple[str, int, int]]:
-    """Recognised (word, start_ms, end_ms) as comparable tokens; a word with several parts ("five-way")
-    shares its time evenly between them."""
+    """Recognised (word, start_ms, end_ms) as comparable tokens; "five-way" shares its time between its parts."""
     tokens = []
     for text, start, end in words:
         parts = [word_key(m.group()) for m in _WORD.finditer(text)]
@@ -98,9 +83,8 @@ def heard_tokens(words: Iterable[tuple[str, int, int]]) -> list[tuple[str, int, 
 
 
 def match_words(chunk_keys: Sequence[str], heard_keys: Sequence[str]) -> list[tuple[int, int]]:
-    """(chunk word, recognised token) pairs, in order: difflib's matching runs of 2+ words, kept from the
-    longest outwards. A run of 4+ words always stays (an ad break may sit between two); a shorter one
-    stays only where the words skipped on both sides are about as many, not a jump."""
+    """(chunk word, recognised token) pairs: difflib's runs of 2+ words, kept from the longest outwards. A run of
+    4+ words always stays (an ad break may sit between two); a shorter one only if it skips as many on both sides."""
     blocks = [b for b in SequenceMatcher(None, chunk_keys, heard_keys, autojunk=False).get_matching_blocks()
               if b.size >= 2]
     if not blocks:
@@ -123,9 +107,8 @@ def match_words(chunk_keys: Sequence[str], heard_keys: Sequence[str]) -> list[tu
 
 def word_times(count: int, pairs: Sequence[tuple[int, int]],
                heard: Sequence[tuple[str, int, int]]) -> list[tuple[int, int]]:
-    """A (start_ms, end_ms) for each of `count` chunk words: matched words take the recognised times,
-    words between two matches share the gap, words before the first (after the last) match continue
-    at the measured speech rate. Times never go backwards."""
+    """(start_ms, end_ms) of each chunk word: matched words take the recognised times, words between matches
+    share the gap, words outside them continue at the measured rate. Times never go backwards."""
     times: list[tuple[float, float] | None] = [None] * count
     for i, j in pairs:
         times[i] = (heard[j][1], heard[j][2])
@@ -138,40 +121,27 @@ def word_times(count: int, pairs: Sequence[tuple[int, int]],
     for i in range(last + 1, count):
         times[i] = (times[i - 1][1], times[i - 1][1] + rate)
     for a, b in zip(anchors, anchors[1:]):
-        if b > a + 1:
-            low, high = times[a][1], max(times[a][1], times[b][0])
+        low, high = times[a][1], max(times[a][1], times[b][0])
+        for k in range(b - a - 1):
             step = (high - low) / (b - a - 1)
-            for k in range(b - a - 1):
-                times[a + 1 + k] = (low + k * step, low + (k + 1) * step)
+            times[a + 1 + k] = (low + k * step, low + (k + 1) * step)
     result, floor = [], 0.0
     for start, end in times:
-        start = max(start, floor)
-        end = max(end, start)
-        result.append((round(start), round(end)))
-        floor = start
+        floor = max(start, floor)
+        result.append((round(floor), round(max(end, floor))))
     return result
 
 
-# ------------------------------------------------------------------ lines
 def line_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) chars of the lines shown with the audio: sentences, a long one split at the comma
-    (or the word) nearest its middle until each has at most MAX_LINE_WORDS words."""
+    """(start, end) chars of the lines shown with the audio: sentences, split at the comma (or word) nearest the
+    middle until each has at most MAX_LINE_WORDS words."""
     bounds = [0, *(m.end() for m in _SENTENCE_END.finditer(text)), len(text)]
-    spans: list[tuple[int, int]] = []
-    for a, b in zip(bounds, bounds[1:]):
-        spans += _split(text, *_trim(text, a, b))
+    spans = [span for a, b in zip(bounds, bounds[1:]) for span in _split(text, a, b)]
     return [(a, b) for a, b in spans if a < b]
 
 
-def _trim(text: str, a: int, b: int) -> tuple[int, int]:
-    while a < b and text[a].isspace():
-        a += 1
-    while b > a and text[b - 1].isspace():
-        b -= 1
-    return a, b
-
-
 def _split(text: str, a: int, b: int) -> list[tuple[int, int]]:
+    a, b = _TRIMMED.fullmatch(text, a, b).span(1)  # without the spaces around
     words = list(_WORD.finditer(text, a, b))
     if len(words) <= MAX_LINE_WORDS:
         return [(a, b)]
@@ -179,30 +149,24 @@ def _split(text: str, a: int, b: int) -> list[tuple[int, int]]:
     low, high = words[len(words) // 4].start(), words[3 * len(words) // 4].start()
     breaks = [m.end() for m in _BREAK.finditer(text, a, b) if low <= m.end() <= high]
     cut = min(breaks, key=lambda p: abs(p - middle)) if breaks else middle
-    return _split(text, *_trim(text, a, cut)) + _split(text, *_trim(text, cut, b))
+    return _split(text, a, cut) + _split(text, cut, b)
 
 
 def cue_lines(text: str, tokens: Sequence[tuple[str, int, int]], times: Sequence[tuple[int, int]]) -> list[dict]:
     """The chunk's lines with the times of their first and last words."""
-    cues, k = [], 0
+    starts, cues = [t[1] for t in tokens], []
     for start, end in line_spans(text):
-        while k < len(tokens) and tokens[k][1] < start:
-            k += 1
-        inside = []
-        while k < len(tokens) and tokens[k][1] < end:
-            inside.append(k)
-            k += 1
-        if inside:
-            cues.append({"text": text[start:end], "start_ms": times[inside[0]][0], "end_ms": times[inside[-1]][1]})
+        first, after = bisect_left(starts, start), bisect_left(starts, end)
+        if first < after:
+            cues.append({"text": text[start:end], "start_ms": times[first][0], "end_ms": times[after - 1][1]})
     return cues
 
 
-# ------------------------------------------------------------------ one chunk
 @dataclass(frozen=True)
 class ChunkSource:
-    """What aligning a chunk needs. estimate: (start_ms, end_ms) from the character position, without the
-    early start; spans: (start_char, end_char, cue_start_ms, cue_end_ms, cue_length) per transcript cue the
-    chunk text is made of (its slices, joined with spaces); clip: the citation's estimated audio fields."""
+    """estimate: (start_ms, end_ms) without the early start; spans: (start_char, end_char, cue_start_ms, cue_end_ms,
+    cue_length) per cue slice (joined with spaces); clip: the citation's audio fields; anchors: the build's time
+    markers; doc_spans: (cue_index, start_char, end_char, the cue's document offset) per slice."""
 
     chunk_id: UUID
     text: str
@@ -211,8 +175,6 @@ class ChunkSource:
     estimate: tuple[int, int] | None
     spans: tuple[tuple, ...] = ()
     clip: tuple[int | None, int | None] = (None, None)
-    # The transcript's time markers (time_anchors.load_anchors, the chunk's build) and what maps chunk
-    # characters to their document offsets: (cue_index, start_char, end_char, cue's document offset) per span.
     anchors: tuple[tuple[int, int], ...] = ()
     doc_spans: tuple[tuple[int, int, int, int], ...] = ()
     char_total: int | None = None
@@ -225,13 +187,27 @@ class Alignment:
     window_start_ms: int
     words: tuple[dict, ...]  # {"w", "s", "e"}: the chunk's words in order, ms
     cues: tuple[dict, ...]  # {"text", "start_ms", "end_ms"}
-    method: str  # "asr" | "stored"
+    method: str  # "asr" | "stored" (saved); "anchored" | "estimated" (never saved)
     model: str | None = None
     coverage: float | None = None  # matched share of the chunk's words (asr), not saved
 
     def row(self) -> dict:
-        return {"audio_url": self.audio_url, "window_start_ms": self.window_start_ms, "words": list(self.words),
-                "cues": list(self.cues), "method": self.method, "model": self.model}
+        return dict(zip(ROW_KEYS, (self.audio_url, self.window_start_ms, list(self.words), list(self.cues),
+                                   self.method, self.model)))
+
+
+def _alignment(source: ChunkSource, tokens, times, method: str, window_start_ms: int, model=None,
+               coverage=None) -> Alignment:
+    words = tuple({"w": t[0], "s": s, "e": e} for t, (s, e) in zip(tokens, times))
+    return Alignment(source.chunk_id, source.audio_url, window_start_ms, words,
+                     tuple(cue_lines(source.text, tokens, times)), method, model, coverage)
+
+
+def _from_marks(source: ChunkSource, tokens, marks, method: str) -> Alignment:
+    """Word i spoken at marks[i] = (start_ms, end_ms), kept monotonic by word_times."""
+    times = word_times(len(tokens), [(i, i) for i in range(len(tokens))],
+                       [(t[0], s, e) for t, (s, e) in zip(tokens, marks)])
+    return _alignment(source, tokens, times, method, times[0][0])
 
 
 def first_window(source: ChunkSource) -> tuple[int, int]:
@@ -241,25 +217,11 @@ def first_window(source: ChunkSource) -> tuple[int, int]:
     return max(0, centre - reach), max(high, 1)
 
 
-def _sides(count: int, pairs, heard, window: tuple[int, int], duration_ms: int | None) -> tuple[bool, bool]:
-    """Whether to decode more before / after the window: the chunk was not found well enough, or it is
-    guessed (at MS_PER_WORD for the words beyond the matches) to reach past that edge."""
-    low, high = window
-    can_left, can_right = low > 0, duration_ms is None or high < duration_ms
-    if len(pairs) < MIN_COVERAGE * count:
-        return can_left, can_right
-    (i0, j0), (i1, j1) = pairs[0], pairs[-1]
-    starts_before = heard[j0][1] - i0 * MS_PER_WORD < low + EDGE_MS
-    ends_after = heard[j1][2] + (count - 1 - i1) * MS_PER_WORD > high - EDGE_MS
-    return can_left and starts_before, can_right and ends_after
-
-
 def align_chunk(source: ChunkSource, decode, transcribe, *, model: str | None = None) -> Alignment | None:
-    """The chunk's words and lines with times from speech recognition, or None when it was not found.
-
+    """The chunk's words and lines timed by speech recognition, or None when it was not found.
     decode(url, start_ms, end_ms) -> (16 kHz mono float32 samples, start_ms of the first sample);
     transcribe(samples) -> [(word, start_ms, end_ms)] relative to the samples."""
-    tokens = words_of(source.text)
+    tokens, duration = words_of(source.text), source.duration_ms
     if not tokens or source.estimate is None:
         return None
     keys = [word_key(t[0]) for t in tokens]
@@ -271,66 +233,50 @@ def align_chunk(source: ChunkSource, decode, transcribe, *, model: str | None = 
     low, high = first_window(source)
     heard = hear(low, high)
     pairs = match_words(keys, [h[0] for h in heard])
-    left, right = _sides(len(keys), pairs, heard, (low, high), source.duration_ms)
+    left, right = low > 0, duration is None or high < duration  # decode more there if the chunk was not found...
+    if len(pairs) >= MIN_COVERAGE * len(keys):  # ...or is guessed (at MS_PER_WORD past the matches) to reach past it
+        (i0, j0), (i1, j1) = pairs[0], pairs[-1]
+        left = left and heard[j0][1] - i0 * MS_PER_WORD < low + EDGE_MS
+        right = right and heard[j1][2] + (len(keys) - 1 - i1) * MS_PER_WORD > high - EDGE_MS
+    if left:
+        heard += hear(max(0, low - WIDEN_MS), low)
+        low = max(0, low - WIDEN_MS)
+    if right:
+        heard += hear(high, high + WIDEN_MS if duration is None else min(duration, high + WIDEN_MS))
     if left or right:
-        extra = []
-        if left:
-            extra += hear(max(0, low - WIDEN_MS), low)
-            low = max(0, low - WIDEN_MS)
-        if right:
-            wider = high + WIDEN_MS if source.duration_ms is None else min(source.duration_ms, high + WIDEN_MS)
-            extra += hear(high, wider)
-            high = wider
-        heard = sorted(heard + extra, key=lambda h: h[1])
+        heard.sort(key=lambda h: h[1])
         pairs = match_words(keys, [h[0] for h in heard])
     coverage = len(pairs) / len(keys)
     if not pairs or coverage < MIN_COVERAGE:
         return None
-    times = word_times(len(keys), pairs, heard)
-    words = tuple({"w": t[0], "s": s, "e": e} for t, (s, e) in zip(tokens, times))
-    return Alignment(source.chunk_id, source.audio_url, low, words, tuple(cue_lines(source.text, tokens, times)),
-                     "asr", model, round(coverage, 3))
+    return _alignment(source, tokens, word_times(len(keys), pairs, heard), "asr", low, model, round(coverage, 3))
 
 
 def stored_alignment(source: ChunkSource) -> Alignment | None:
-    """From the transcript's own cue timing when every cue of the chunk has it: a word's time is its
-    character position inside its cue's time. None otherwise."""
-    spans = source.spans
-    if not spans or any(not isinstance(s[2], int) or not isinstance(s[3], int) or not s[4] for s in spans):
-        return None
+    """Timed by the transcript's cues (a word at its position inside its cue's time), if all of them have timing."""
     tokens = words_of(source.text)
-    if not tokens:
+    if not tokens or not source.spans or any(
+            not isinstance(s[2], int) or not isinstance(s[3], int) or not s[4] for s in source.spans):
         return None
-    pieces, offset = [], 0  # (chunk char where the slice starts, start_char, end_char, cue start, cue end, length)
-    for start_char, end_char, cue_start, cue_end, length in spans:
+    pieces, offset = [], 0  # (chunk char where the slice starts, its start_char, cue start, cue end, cue length)
+    for start_char, end_char, cue_start, cue_end, length in source.spans:
         pieces.append((offset, start_char, cue_start, max(cue_start, cue_end), length))
         offset += end_char - start_char + 1
 
     def at(char: int) -> int:
         piece = next((p for p in reversed(pieces) if p[0] <= char), pieces[0])
-        within = piece[1] + char - piece[0]
-        return round(piece[2] + (piece[3] - piece[2]) * min(max(within / piece[4], 0.0), 1.0))
+        return round(piece[2] + (piece[3] - piece[2]) * min(max((piece[1] + char - piece[0]) / piece[4], 0.0), 1.0))
 
-    times = word_times(len(tokens), [(i, i) for i in range(len(tokens))],
-                       [(t[0], at(t[1]), at(t[2])) for t in tokens])
-    words = tuple({"w": t[0], "s": s, "e": e} for t, (s, e) in zip(tokens, times))
-    return Alignment(source.chunk_id, source.audio_url, times[0][0], words,
-                     tuple(cue_lines(source.text, tokens, times)), "stored")
+    return _from_marks(source, tokens, [(at(t[1]), at(t[2])) for t in tokens], "stored")
 
 
 def anchored_alignment(source: ChunkSource) -> tuple[Alignment, str] | None:
-    """Without audio or recognition: every chunk word's time interpolated between the publisher's time
-    markers (time_anchors.interpolate), and the confidence ("anchored" when the whole chunk lies between
-    markers, else "extrapolated"). Method "anchored" or "estimated"; never saved. None without markers."""
-    from translation_agent_demo.storage.time_anchors import chunk_to_document_offset, interpolate
-
-    if not source.anchors or not source.doc_spans:
-        return None
+    """Without audio: word times interpolated between the publisher's markers, and the confidence: "anchored"
+    when the whole chunk lies between markers, else "extrapolated" (method "estimated"). None without markers."""
     tokens = words_of(source.text)
-    if not tokens:
+    if not source.anchors or not source.doc_spans or not tokens:
         return None
-    spans = [(k, a, b) for k, a, b, _ in source.doc_spans]
-    starts = {k: start for k, _, _, start in source.doc_spans}
+    spans, starts = [(k, a, b) for k, a, b, _ in source.doc_spans], {k: s for k, _, _, s in source.doc_spans}
 
     def at(char: int):
         return interpolate(source.anchors, chunk_to_document_offset(spans, starts, char),
@@ -339,38 +285,35 @@ def anchored_alignment(source: ChunkSource) -> tuple[Alignment, str] | None:
     marks = [(at(t[1]), at(t[2])) for t in tokens]
     if any(s.time_ms is None or e.time_ms is None for s, e in marks):
         return None
-    confidence = "anchored" if all(s.confidence == e.confidence == "anchored" for s, e in marks) else "extrapolated"
-    times = word_times(len(tokens), [(i, i) for i in range(len(tokens))],
-                       [(t[0], s.time_ms, e.time_ms) for t, (s, e) in zip(tokens, marks)])
-    words = tuple({"w": t[0], "s": s, "e": e} for t, (s, e) in zip(tokens, times))
-    method = "anchored" if confidence == "anchored" else "estimated"
-    return Alignment(source.chunk_id, source.audio_url, times[0][0], words,
-                     tuple(cue_lines(source.text, tokens, times)), method), confidence
+    anchored = all(s.confidence == e.confidence == "anchored" for s, e in marks)
+    alignment = _from_marks(source, tokens, [(s.time_ms, e.time_ms) for s, e in marks],
+                            "anchored" if anchored else "estimated")
+    return alignment, "anchored" if anchored else "extrapolated"
 
 
-# ------------------------------------------------------------------ the quote
+def align_source(source: ChunkSource, decode, transcriber) -> Alignment | None:
+    return stored_alignment(source) or align_chunk(source, decode, transcriber,
+                                                   model=getattr(transcriber, "name", None))
+
+
 def quote_span(words: Sequence[dict], quote: str) -> tuple[int, int] | None:
-    """First and last word index of the quote among the chunk's words: the exact words, else the most
-    similar run of as many words (at least 60% alike)."""
-    wanted = [word_key(w) for w, _, _ in words_of(quote)]
-    keys = [word_key(w["w"]) for w in words]
+    """First and last word index of the quote: the exact words, else the most similar run (at least 60% alike)."""
+    wanted, keys = [word_key(w) for w, _, _ in words_of(quote)], [word_key(w["w"]) for w in words]
     n = len(wanted)
     if not n or not keys:
         return None
-    for i in range(len(keys) - n + 1):
-        if keys[i:i + n] == wanted:
-            return i, i + n - 1
-    best, where = 0.0, 0
-    for i in range(max(1, len(keys) - n + 1)):
-        ratio = SequenceMatcher(None, wanted, keys[i:i + n], autojunk=False).ratio()
-        if ratio > best:
-            best, where = ratio, i
-    return (where, min(len(keys), where + n) - 1) if best >= 0.6 else None
+    exact = next((i for i in range(len(keys) - n + 1) if keys[i:i + n] == wanted), None)
+    if exact is not None:
+        return exact, exact + n - 1
+    ratios = [SequenceMatcher(None, wanted, keys[i:i + n], autojunk=False).ratio()
+              for i in range(max(1, len(keys) - n + 1))]
+    where = max(range(len(ratios)), key=ratios.__getitem__)
+    return (where, min(len(keys), where + n) - 1) if ratios[where] >= 0.6 else None
 
 
 def clip_cues(cues: Sequence[dict], start: int, end: int) -> list[dict]:
-    """The lines from start to end, then one more before, one after, ... while the clip is under
-    MIN_CLIP_MS and stays within MAX_CLIP_MS (the quote's own lines always stay)."""
+    """The lines from start to end, then one more before, one after, ... while under MIN_CLIP_MS and within
+    MAX_CLIP_MS (the quote's own lines always stay)."""
     inside = [k for k, c in enumerate(cues) if c["end_ms"] > start and c["start_ms"] < end]
     if not inside:
         inside = [min(range(len(cues)), key=lambda k: abs(cues[k]["start_ms"] - start))]
@@ -381,8 +324,8 @@ def clip_cues(cues: Sequence[dict], start: int, end: int) -> list[dict]:
 
     turn = 0
     while span(a, b) < MIN_CLIP_MS:
-        options = [o for o in ((a - 1, b) if a > 0 else None, (a, b + 1) if b < len(cues) - 1 else None)
-                   if o is not None and span(*o) <= MAX_CLIP_MS]
+        options = [(x, y) for x, y in ((a - 1, b), (a, b + 1))
+                   if x >= 0 and y < len(cues) and span(x, y) <= MAX_CLIP_MS]
         if not options:
             break
         a, b = options[turn % len(options)]
@@ -391,28 +334,21 @@ def clip_cues(cues: Sequence[dict], start: int, end: int) -> list[dict]:
 
 
 def answer(row: dict, quote: str) -> dict:
-    """A ready answer from a saved alignment row."""
+    """A ready answer from a saved alignment row: the quote's place and the lines around it (30-40 s)."""
     words, cues = row["words"], row["cues"]
     span = quote_span(words, quote)
+    quote_start, quote_end = (words[span[0]]["s"], words[span[1]]["e"]) if span else (None, None)
+    lines = clip_cues(cues, *((quote_start, quote_end) if span else (cues[0]["start_ms"], cues[0]["end_ms"])))
+    clip_start, clip_end = lines[0]["start_ms"], lines[-1]["end_ms"]
     if span:
-        quote_start, quote_end = words[span[0]]["s"], words[span[1]]["e"]
-        lines = clip_cues(cues, quote_start, quote_end)
-    else:
-        quote_start = quote_end = None
-        lines = clip_cues(cues, cues[0]["start_ms"], cues[0]["end_ms"])
-    clip_start = min(lines[0]["start_ms"], quote_start if quote_start is not None else lines[0]["start_ms"])
-    clip_end = max(lines[-1]["end_ms"], quote_end if quote_end is not None else lines[-1]["end_ms"])
+        clip_start, clip_end = min(clip_start, quote_start), max(clip_end, quote_end)
     return {"status": "ready", "method": row["method"], "audio_url": row["audio_url"], "clip_start_ms": clip_start,
             "clip_end_ms": clip_end, "quote_start_ms": quote_start, "quote_end_ms": quote_end, "cues": lines}
 
 
 def rough_answer(source: ChunkSource, quote: str, *, refining: bool) -> dict | None:
-    """A ready answer timed from the transcript's markers (anchored_alignment), or None without them.
-    The quote's span starts ROUGH_LEAD_MS early and ends ROUGH_TAIL_MS late (marker error: median 3.3 s),
-    so the player's default loop (the quote) still holds the whole quote. "confidence": "anchored" (between
-    markers) or "extrapolated"; "refining": recognition is running and may replace the answer."""
-    from translation_agent_demo.storage.episode_audio import ANCHORED_LEAD_IN_MS, ANCHORED_TAIL_MS
-
+    """A ready answer timed from the markers, or None. The quote is widened by ANCHORED_LEAD_IN_MS/TAIL_MS (marker
+    error: median 3.3 s) so the player's loop still holds it; "refining": recognition may replace the answer."""
     rough = anchored_alignment(source)
     if rough is None:
         return None
@@ -434,10 +370,8 @@ def not_ready(status: str, source: ChunkSource | None) -> dict:
             "clip_start_ms": start, "clip_end_ms": end, "quote_start_ms": None, "quote_end_ms": None, "cues": []}
 
 
-# ------------------------------------------------------------------ audio and speech
 def decode_window(url: str, start_ms: int, end_ms: int, *, seconds: float = DECODE_SECONDS):
-    """16 kHz mono float32 samples of the remote audio from start_ms to end_ms, and where they start.
-    PyAV (FFmpeg) seeks by time, so only about that part of the file is fetched; nothing is written."""
+    """16 kHz mono float32 samples from start_ms to end_ms, and where they start; PyAV fetches only about that."""
     import av
     import numpy as np
 
@@ -492,33 +426,17 @@ def can_align() -> bool:
     return all(importlib.util.find_spec(name) is not None for name in ("faster_whisper", "av", "numpy"))
 
 
-# ------------------------------------------------------------------ the database
 _APPROVED = """
-    JOIN public.corpus_builds AS b USING (build_id)
-    JOIN public.podcast_transcripts AS d USING (document_id)
-    JOIN public.podcast_sources AS s USING (source_key)
-    JOIN public.podcast_feed_reviews AS r ON r.feed_id = s.feed_id
+    JOIN public.corpus_builds AS b USING (build_id) JOIN public.podcast_transcripts AS d USING (document_id)
+    JOIN public.podcast_sources AS s USING (source_key) JOIN public.podcast_feed_reviews AS r ON r.feed_id = s.feed_id
 """
 _APPROVED_WHERE = """
     AND b.status = 'ready' AND s.rights_status = 'approved' AND r.status = 'approved'
-    AND public.transcript_url_matches_review_scope(d.download_url, r.transcript_url_prefix)
-"""
+    AND public.transcript_url_matches_review_scope(d.download_url, r.transcript_url_prefix)"""
 _SOURCE_SQL = f"""
     SELECT c.text, c.start_ms, c.end_ms, a.enclosure_url, a.duration_s, pos.char_start, pos.char_end,
            pos.char_total, cue.timing, c.build_id, cue.doc_spans
-    FROM public.corpus_chunks AS c {_APPROVED}
-    JOIN public.podcast_episode_audio AS a
-      ON a.episode_id = s.episode_id AND (a.feed_id IS NULL OR a.feed_id = s.feed_id)
-    CROSS JOIN LATERAL (
-        SELECT coalesce(sum(length(q.value ->> 'text'))
-                   FILTER (WHERE q.n - 1 < (c.spans -> 0 ->> 'cue_index')::int), 0)
-                 + (c.spans -> 0 ->> 'start_char')::int AS char_start,
-               coalesce(sum(length(q.value ->> 'text'))
-                   FILTER (WHERE q.n - 1 < (c.spans -> -1 ->> 'cue_index')::int), 0)
-                 + (c.spans -> -1 ->> 'end_char')::int AS char_end,
-               coalesce(sum(length(q.value ->> 'text')), 0) AS char_total
-        FROM jsonb_array_elements(b.cues) WITH ORDINALITY AS q(value, n)
-    ) AS pos
+    FROM public.corpus_chunks AS c {_APPROVED} {AUDIO_POSITION_SQL}
     CROSS JOIN LATERAL (
         SELECT jsonb_agg(jsonb_build_array((sp ->> 'start_char')::int, (sp ->> 'end_char')::int,
                    b.cues -> ((sp ->> 'cue_index')::int) -> 'start_ms',
@@ -529,30 +447,20 @@ _SOURCE_SQL = f"""
                    (SELECT coalesce(sum(length(q.value ->> 'text')), 0)
                     FROM jsonb_array_elements(b.cues) WITH ORDINALITY AS q(value, n)
                     WHERE q.n - 1 < (sp ->> 'cue_index')::int)) ORDER BY t.n) AS doc_spans
-        FROM jsonb_array_elements(c.spans) WITH ORDINALITY AS t(sp, n)
-    ) AS cue
-    WHERE c.chunk_id = %s AND s.source_key LIKE 'podcast_index:%%' {_APPROVED_WHERE}
-"""
+        FROM jsonb_array_elements(c.spans) WITH ORDINALITY AS t(sp, n)) AS cue
+    WHERE c.chunk_id = %s AND s.source_key LIKE 'podcast_index:%%' {_APPROVED_WHERE}"""
 _ROW_SQL = f"""
-    SELECT al.audio_url, al.window_start_ms, al.words, al.cues, al.method, al.model
-    FROM public.chunk_audio_alignment AS al
-    JOIN public.corpus_chunks AS c USING (chunk_id) {_APPROVED}
-    WHERE al.chunk_id = %s {_APPROVED_WHERE}
-"""
+    SELECT {', '.join('al.' + key for key in ROW_KEYS)} FROM public.chunk_audio_alignment AS al
+    JOIN public.corpus_chunks AS c USING (chunk_id) {_APPROVED} WHERE al.chunk_id = %s {_APPROVED_WHERE}"""
 
 
 def load_source(conn, chunk_id: UUID) -> ChunkSource | None:
     """An approved chunk with publisher audio, or None."""
-    from translation_agent_demo.storage.episode_audio import anchors_for_builds, estimate_clip
-    from translation_agent_demo.storage.retrieval import _display_url
-    from translation_agent_demo.storage.time_anchors import interpolate
-
     row = conn.execute(_SOURCE_SQL, (chunk_id,)).fetchone()
     if row is None:
         return None
     text, start_ms, end_ms, url, duration_s, char_start, char_end, char_total, timing, build_id, doc_spans = row
-    url = _display_url(url)
-    if url is None:
+    if (url := _display_url(url)) is None:
         return None
     anchors = tuple(anchors_for_builds(conn, [build_id]).get(build_id, ())) if start_ms is None else ()
     duration_ms = duration_s * 1000 if duration_s else None
@@ -566,42 +474,28 @@ def load_source(conn, chunk_id: UUID) -> ChunkSource | None:
                        for char in (char_start, char_end))
         estimate = (first, max(first, last)) if first is not None and last is not None else None
     elif clip.audio_start_ms is not None and duration_s and char_total:
-        estimate = (round(char_start / char_total * duration_s * 1000), round(char_end / char_total * duration_s * 1000))
-    spans = tuple(tuple(span) for span in timing or ())
-    return ChunkSource(chunk_id, text, url, duration_ms, estimate, spans,
+        estimate = tuple(round(char / char_total * duration_s * 1000) for char in (char_start, char_end))
+    return ChunkSource(chunk_id, text, url, duration_ms, estimate, tuple(tuple(span) for span in timing or ()),
                        (clip.audio_start_ms, clip.audio_end_ms), anchors,
                        tuple(tuple(int(v) for v in span) for span in doc_spans or ()), char_total)
 
 
 def read_row(conn, chunk_id: UUID) -> dict | None:
     row = conn.execute(_ROW_SQL, (chunk_id,)).fetchone()
-    if row is None:
-        return None
-    url, window_start_ms, words, cues, method, model = row
-    return {"audio_url": url, "window_start_ms": window_start_ms, "words": words, "cues": cues,
-            "method": method, "model": model}
+    return None if row is None else dict(zip(ROW_KEYS, row))
 
 
 def save_alignment(conn, alignment: Alignment) -> None:
-    from psycopg.types.json import Jsonb
-
     with conn.transaction():
-        conn.execute(
-            """INSERT INTO public.chunk_audio_alignment
-                   (chunk_id, audio_url, window_start_ms, words, cues, method, model)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (chunk_id) DO UPDATE SET audio_url = EXCLUDED.audio_url,
-                   window_start_ms = EXCLUDED.window_start_ms, words = EXCLUDED.words, cues = EXCLUDED.cues,
-                   method = EXCLUDED.method, model = EXCLUDED.model, created_at = now()""",
-            (alignment.chunk_id, alignment.audio_url, alignment.window_start_ms, Jsonb(list(alignment.words)),
-             Jsonb(list(alignment.cues)), alignment.method, alignment.model))
+        conn.execute("""
+            INSERT INTO public.chunk_audio_alignment (chunk_id, audio_url, window_start_ms, words, cues, method, model)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chunk_id) DO UPDATE SET audio_url = EXCLUDED.audio_url,
+                window_start_ms = EXCLUDED.window_start_ms, words = EXCLUDED.words, cues = EXCLUDED.cues,
+                method = EXCLUDED.method, model = EXCLUDED.model, created_at = now()""",
+                     (alignment.chunk_id, alignment.audio_url, alignment.window_start_ms, Jsonb(list(alignment.words)),
+                      Jsonb(list(alignment.cues)), alignment.method, alignment.model))
 
 
-def ensure_table(conn) -> None:
-    conn.execute(MIGRATION.read_text(encoding="utf-8"), prepare=False)
-
-
-# ------------------------------------------------------------------ the service
 class _Memory(OrderedDict):
     """A small least-recently-used map."""
 
@@ -613,11 +507,9 @@ class _Memory(OrderedDict):
 
 
 class AudioAlignments:
-    """GET /api/audio/alignment's answers and the background alignment queue (frontend/server.py).
-
-    database: PostgresSettings for the cache table and the chunk sources (None: no database);
-    align: run the recogniser (needs the database); snapshot: a JSON file {"alignments": {chunk_id: row}}
-    read when there is no database (the Vercel bundle). Nothing connects or starts before the first use."""
+    """GET /api/audio/alignment's answers and the background queue. database: PostgresSettings (None: none);
+    align: run the recogniser (needs the database); snapshot: {"alignments": {chunk_id: row}} JSON read without a
+    database (the Vercel bundle). Nothing connects or starts before the first use."""
 
     def __init__(self, *, database=None, align: bool = False, snapshot: Path | None = None,
                  transcriber: Callable | None = None, decode: Callable = decode_window,
@@ -627,26 +519,21 @@ class AudioAlignments:
         self.decode, self.workers = decode, workers
         self.transcriber = transcriber if transcriber is not None else (WhisperTranscriber() if self.aligning else None)
         self.log = log or (lambda line: print(line, flush=True))
-        self._lock = threading.Lock()
+        self._lock, self._ensure_lock, self._ensured = threading.Lock(), threading.Lock(), False
         self._rows, self._sources = _Memory(), _Memory()
         self._state: dict[UUID, object] = {}  # "queued" | "running" | when it failed (clock)
         self._queue: queue.PriorityQueue = queue.PriorityQueue()
         self._order = itertools.count()
         self._threads: list[threading.Thread] = []
-        self._ensured, self._ensure_lock = False, threading.Lock()
-        self._saved: dict[str, dict] | None = None
 
     @classmethod
     def from_environment(cls, *, local: bool, environ=None, database=None, log=None) -> "AudioAlignments":
-        """COACH_AUDIO_ALIGN (default on for the local server, off otherwise; any other value stops the start).
-        The local server reads the database's settings; aligning also needs faster-whisper installed."""
-        environ = os.environ if environ is None else environ
-        raw = environ.get("COACH_AUDIO_ALIGN")
+        """COACH_AUDIO_ALIGN: on by default locally (aligning also needs faster-whisper), off otherwise."""
+        raw = (os.environ if environ is None else environ).get("COACH_AUDIO_ALIGN")
         setting = (raw or "").strip().lower() or ("on" if local else "off")
         if setting not in SETTING_CHOICES:
             raise ValueError(f"COACH_AUDIO_ALIGN must be on or off; got {raw!r}.")
         if local and database is None:
-            from translation_agent_demo.storage.postgres import CorpusStorageError, PostgresSettings
             try:
                 database = PostgresSettings.from_environment()
             except CorpusStorageError:
@@ -661,47 +548,37 @@ class AudioAlignments:
             return "saved alignments only (COACH_AUDIO_ALIGN=off or faster-whisper missing)"
         return "snapshot alignments only" if self.snapshot else "off"
 
-    # ------------------------------------------------------- answers
     def lookup(self, chunk_id: UUID, quote: str) -> dict:
-        row = self._row(chunk_id)
-        if row is not None:
+        if (row := self._row(chunk_id)) is not None:
             return answer(row, quote)
         source = self._source(chunk_id)
-        status = "unavailable"
-        if self.aligning and source is not None:
-            with self._lock:
-                state = self._state.get(chunk_id)
-                failed = isinstance(state, float) and self.clock() - state < FAILED_SECONDS
-            if not failed and (state == "running"
-                               or self._submit(chunk_id, priority=0, limit=MAX_JOBS + WORKERS * 4)):
-                status = "pending"
+        pending = self.aligning and source is not None and self._submit(chunk_id, priority=0,
+                                                                        limit=MAX_JOBS + WORKERS * 4)
         # Lines timed from the transcript's markers play at once; "refining": recognition may replace them.
-        rough = rough_answer(source, quote, refining=status == "pending") if source is not None else None
-        return rough if rough is not None else not_ready(status, source)
+        rough = rough_answer(source, quote, refining=pending) if source is not None else None
+        return rough if rough is not None else not_ready("pending" if pending else "unavailable", source)
 
     def prefetch(self, chunk_ids: Iterable[UUID]) -> None:
         """Start aligning chunks the learner has just been shown, behind any asked-for chunk."""
-        if not self.aligning:
-            return
-        for chunk_id in dict.fromkeys(chunk_ids):
+        for chunk_id in dict.fromkeys(chunk_ids) if self.aligning else ():
             if chunk_id not in self._rows:
                 self._submit(chunk_id, priority=1, limit=MAX_JOBS)
 
-    # ------------------------------------------------------- the queue
     def _submit(self, chunk_id: UUID, *, priority: int, limit: int) -> bool:
+        """Queue a chunk (a repeat raises its priority); True when it is queued or running."""
         with self._lock:
             state = self._state.get(chunk_id)
-            if state == "running" or (isinstance(state, float) and self.clock() - state < FAILED_SECONDS):
-                return False
+            if state == "running":
+                return True
             busy = sum(1 for value in self._state.values() if value in ("queued", "running"))
-            if state != "queued" and busy >= limit:
+            if (isinstance(state, float) and self.clock() - state < FAILED_SECONDS) or (
+                    state != "queued" and busy >= limit):
                 return False
             self._state[chunk_id] = "queued"
-            self._queue.put((priority, next(self._order), chunk_id))  # a repeat raises its priority
+            self._queue.put((priority, next(self._order), chunk_id))
             while len(self._threads) < self.workers:
-                thread = threading.Thread(target=self._work, name="audio-align", daemon=True)
-                self._threads.append(thread)
-                thread.start()
+                self._threads.append(threading.Thread(target=self._work, name="audio-align", daemon=True))
+                self._threads[-1].start()
         return True
 
     def _work(self) -> None:
@@ -727,39 +604,32 @@ class AudioAlignments:
                                  "ms": round((self.clock() - started) * 1000)}))
 
     def _align(self, chunk_id: UUID) -> tuple[dict | None, dict]:
-        from translation_agent_demo.storage.postgres import connect_database
-
         saved = self._read(lambda conn: read_row(conn, chunk_id))  # aligned by another process meanwhile
         if saved is not None:
             return saved, {"method": saved["method"], "saved": True}
         source = self._source(chunk_id, fresh=True)
-        if source is None:
-            return None, {"error": "no_source"}
-        alignment = stored_alignment(source) or align_chunk(source, self.decode, self.transcriber,
-                                                           model=getattr(self.transcriber, "name", None))
+        alignment = align_source(source, self.decode, self.transcriber) if source is not None else None
         if alignment is None:
-            return None, {"error": "not_found"}
+            return None, {"error": "no_source" if source is None else "not_found"}
         with connect_database(self.database) as conn:
             self._ensure(conn)
             save_alignment(conn, alignment)
         return alignment.row(), {"method": alignment.method, "coverage": alignment.coverage}
 
-    # ------------------------------------------------------- reading
     def _ensure(self, conn) -> None:
         with self._ensure_lock:
             if not self._ensured:
-                ensure_table(conn)
+                conn.execute(MIGRATION.read_text(encoding="utf-8"), prepare=False)
                 self._ensured = True
 
     def _row(self, chunk_id: UUID) -> dict | None:
         with self._lock:
             if chunk_id in self._rows:
                 return self._rows[chunk_id]
-        row = None
         if self.database is not None:
             row = self._read(lambda conn: read_row(conn, chunk_id))
-        elif self.snapshot is not None:
-            row = self._snapshot().get(str(chunk_id))
+        else:
+            row = self._saved.get(str(chunk_id)) if self.snapshot is not None else None
         if row is not None:
             with self._lock:
                 self._rows.remember(chunk_id, row)
@@ -778,9 +648,6 @@ class AudioAlignments:
 
     def _read(self, query):
         """One query on a fresh connection; None when the database (or the table) is not there."""
-        import psycopg
-        from translation_agent_demo.storage.postgres import CorpusStorageError, connect_database
-
         try:
             with connect_database(self.database) as conn:
                 try:
@@ -793,18 +660,16 @@ class AudioAlignments:
         except (CorpusStorageError, psycopg.Error, OSError):
             return None
 
-    def _snapshot(self) -> dict:
-        if self._saved is None:
-            try:
-                payload = json.loads(self.snapshot.read_text(encoding="utf-8"))
-                saved = payload.get("alignments") if isinstance(payload, dict) else None
-                self._saved = saved if isinstance(saved, dict) else {}
-            except (OSError, ValueError):
-                self._saved = {}
-        return self._saved
+    @cached_property
+    def _saved(self) -> dict:
+        try:
+            payload = json.loads(self.snapshot.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        saved = payload.get("alignments") if isinstance(payload, dict) else None
+        return saved if isinstance(saved, dict) else {}
 
 
-# ------------------------------------------------------------------ precompute
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m frontend.audio_align", description=__doc__.split("\n\n")[0])
     parser.add_argument("chunk_ids", nargs="*", type=UUID)
@@ -812,28 +677,21 @@ def main(argv=None) -> int:
     parser.add_argument("--quote", help="also answer GET /api/audio/alignment for this quote (one chunk)")
     parser.add_argument("--model", help=f"faster-whisper model (default COACH_ALIGN_MODEL, else {DEFAULT_MODEL})")
     args = parser.parse_args(argv)
-    ids = list(args.chunk_ids)
-    if args.ids_file:
-        ids += [UUID(line.strip()) for line in args.ids_file.read_text().splitlines() if line.strip()]
-    if not ids:
+    lines = args.ids_file.read_text().splitlines() if args.ids_file else []
+    if not (ids := [*args.chunk_ids, *(UUID(line.strip()) for line in lines if line.strip())]):
         parser.error("give chunk ids")
     if not can_align():
         parser.error("install faster-whisper (translation_agent_demo/requirements-local.txt)")
-    from translation_agent_demo.storage.postgres import PostgresSettings, connect_database
-
     database = PostgresSettings.from_environment()
     transcriber = WhisperTranscriber(args.model, threads=6, workers=1)
     with connect_database(database) as conn:
-        ensure_table(conn)
+        conn.execute(MIGRATION.read_text(encoding="utf-8"), prepare=False)
     failed = 0
     for chunk_id in dict.fromkeys(ids):
         started = time.monotonic()
         with connect_database(database) as conn:
             source = load_source(conn, chunk_id)
-        alignment = None
-        if source is not None:
-            alignment = stored_alignment(source) or align_chunk(source, decode_window, transcriber,
-                                                               model=transcriber.name)
+        alignment = align_source(source, decode_window, transcriber) if source is not None else None
         if alignment is not None:
             with connect_database(database) as conn:
                 save_alignment(conn, alignment)
@@ -848,4 +706,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

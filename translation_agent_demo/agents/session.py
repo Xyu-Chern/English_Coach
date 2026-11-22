@@ -15,19 +15,16 @@ Items a reply loses to validation are kept until the system's next decision call
 Every trace step says when it started (details.started_ms): milliseconds since the request's first
 session started; a continuation counts from the carried prefix's end (prefix.elapsed_ms).
 
-Independent searches can overlap (CoachDependencies.search_workers > 1): a step that knows its
-searches in advance (the first stage's six, a baseline round's) starts them at once with
-prefetching(), then asks for them one by one as before. search() takes the prefetched result
-instead of calling the tool, but checks the budget, records the step and raises exactly as it
-would have, in the order it is asked: trace, budgets and results are the sequential ones; only
-the waiting overlaps. The session's bookkeeping is guarded by a lock, so it is thread-safe too.
+Independent searches can overlap (CoachDependencies.search_workers > 1): prefetching() starts a step's
+known searches at once and search() takes each result in the order it is asked, so trace, budgets and
+results are the sequential ones. The session's bookkeeping is guarded by a lock (thread-safe).
 """
 
 import json
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, TypeVar
 from uuid import uuid4
@@ -63,10 +60,7 @@ class CoachDependencies:
     model: ChatModel | ObservedChatModel
     search: SearchCorpus
     clock: Callable[[], float] = time.perf_counter
-    # How many of a step's independent searches may run at once. 1 (the default): one after another.
-    # More needs a search that is safe to call from that many threads at once (its own connection
-    # per call, no order-dependent state); results and trace stay the sequential ones either way.
-    search_workers: int = 1
+    search_workers: int = 1  # a step's searches run at once (more than 1: the search tool must be thread-safe)
 
     def __post_init__(self):
         if type(self.search_workers) is not int or not 1 <= self.search_workers <= 9:
@@ -145,10 +139,6 @@ class RequestSession:
     def searches_left(self) -> int:
         return self.budget.searches - self.searches_used
 
-    @property
-    def parallel_searches(self) -> bool:
-        return self.deps.search_workers > 1
-
     # ----------------------------------------------------------- tools
     def ask(self, stage: str, prompt: str, payload: dict, schema: type[T]) -> T:
         """One budgeted model call, decoded against the schema (structured outputs) and validated.
@@ -192,19 +182,20 @@ class RequestSession:
 
     @contextmanager
     def prefetching(self, searches: list[SearchCorpusArgs]) -> Iterator[None]:
-        """Start these searches at once (deps.search_workers threads) for search() to take inside the block.
-
-        Nothing happens with one worker, one search or no budget. At most searches_left start; a
-        search() with other arguments, or after its prefetched twin was taken, calls the tool as
-        usual. Prefetched searches not taken by the end of the block are dropped (not recorded,
-        not counted; the tool may still have run them)."""
+        """Start at most searches_left of these searches at once (with 2+ workers) for search() to take inside
+        the block; one not taken by its end is dropped, uncounted. Other searches call the tool as usual. For 2+
+        searches a tool's prepare(searches) runs first (the app's: one embedding call); its failure is ignored."""
         searches = list(searches)[:max(0, self.searches_left)]
+        prepare = getattr(self.deps.search, "prepare", None)
+        if callable(prepare) and len(searches) > 1:
+            with suppress(Exception):
+                prepare(searches)
         workers = min(self.deps.search_workers, len(searches))
         if workers > 1:
             pool = ThreadPoolExecutor(workers, thread_name_prefix="coach-search")
             with self._lock:
                 for args in searches:
-                    self._prefetched.setdefault(_search_key(args), []).append(pool.submit(self._call_search, args))
+                    self._prefetched.setdefault(args.model_dump_json(), []).append(pool.submit(self._call_search, args))
             pool.shutdown(wait=False)  # the submitted searches still run; nothing waits for them here
         try:
             yield
@@ -223,7 +214,7 @@ class RequestSession:
                 raise CoachError("search_budget_exhausted")
             stage, position = stage or f"search_{self.searches_used + 1}", len(self.embedding_usage)
             self.embedding_usage.append(None)
-            waiting = self._prefetched.get(_search_key(args))
+            waiting = self._prefetched.get(args.model_dump_json())
             prefetched = waiting.pop(0) if waiting else None
         details = {**details, "query": args.query, "key_phrase": args.literal_phrase}
         encoded = args.model_dump(mode="json")
@@ -249,8 +240,7 @@ class RequestSession:
         return SearchOutcome(list(result.hits), corpus_count)
 
     def _call_search(self, args: SearchCorpusArgs) -> tuple[float, float, SearchCorpusResult | None, Exception | None]:
-        """The tool call itself and its check: (started, ended, result, failure). Safe to run in a worker thread:
-        it touches no session state."""
+        """The tool call and its check: (started, ended, result, failure); touches no session state."""
         started = self.deps.clock()
         try:
             result = self.deps.search(args)
@@ -315,10 +305,6 @@ class RequestSession:
                 raise TypeError("Expected ChatCompletion.")
             return response
         return ChatCompletion(self.deps.model.complete(system_prompt=prompt, user_payload=payload))
-
-
-def _search_key(args: SearchCorpusArgs) -> str:
-    return args.model_dump_json()
 
 
 def _total(values) -> int | None:

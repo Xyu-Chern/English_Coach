@@ -1,26 +1,10 @@
 """Build a Vercel project containing only publishable assets and approved passages.
 
-    python -m frontend.vercel.package [--out DIR] [--admin-run RUN] [--admin-results DIR] [--admin-tasks FILE]
-        [--admin-systems a,b] [--coach-system baseline|agent] [--skip-apk] [--skip-search-data]
-
-public/        static files: the web app at /, the APK at /downloads/, the admin page (frontend/admin) at
-               /admin/ with its data.json (+ data-traces.json when split). Open, like the app (D4).
-api/search.py  the function (frontend/vercel/index.py) with the Python files, corpus/ and encoder/ it reads.
-vercel.json    the function's limits and files, /admin -> /admin/ (the page reads data.json relatively), and
-               X-Robots-Tag: noindex on /admin and everything under it. /admin/requests.json and /admin/mode
-               (the live request log and the mode switch, frontend/request_log.py) are rewritten to the
-               function, which sees the original path, as is GET /api/audio/alignment: it answers from
-               corpus/alignments.json, the saved alignments of the snapshot's chunks (export_alignments;
-               the function never runs speech recognition, and faster-whisper stays out of its
-               requirements). The database driver (psycopg) comes from translation_agent_demo/requirements.txt.
-
-The admin data is an evaluation run's record (D5), built by frontend.admin_data from --admin-run (or
-COACH_ADMIN_RUN) under --admin-results (or COACH_ADMIN_RESULTS, default evaluation/results), in the
-deployment's mode: --coach-system, else COACH_SYSTEM, else agent. Without a run, a frontend/admin/data.json
-is shipped when there is one; otherwise the page ships without data and says so.
-
---skip-apk and --skip-search-data leave out the Android build and the corpus and encoder, for a preview
-that cannot offer the APK or answer questions; they need --out, so the deploy folder never holds one.
+public/ holds the web app, the APK and the admin page (/admin/, noindex) with its data.json, built by
+frontend.admin_data from --admin-run (else the committed frontend/admin/data.json, else none). api/search.py
+is frontend/vercel/index.py; vercel.json rewrites /admin/requests.json, /admin/mode and /api/audio/alignment
+(answered from corpus/alignments.json, never by speech recognition) to it. --skip-apk / --skip-search-data
+build a preview and need --out.
 """
 
 import argparse
@@ -47,14 +31,12 @@ FUNCTION_DIRS = ("corpus", "encoder", "translation_agent_demo", "frontend", "eva
 ADMIN_PATHS = ("/admin", "/admin/(.*)")  # what vercel.json marks X-Robots-Tag: noindex
 LIVE_ADMIN_PATHS = ("/admin/requests.json", "/admin/mode")  # answered by the function (frontend/server.py)
 FUNCTION_PATHS = (*LIVE_ADMIN_PATHS, "/api/audio/alignment")  # rewritten to the function, which sees the path
-# Local-only packages: the Vercel function never runs speech recognition (COACH_AUDIO_ALIGN is off there).
-LOCAL_ONLY_REQUIREMENTS = ("-r", "anthropic==", "huggingface-hub==", "faster-whisper==")
-# The Python files the function needs beyond translation_agent_demo/ (copied whole) and its entry point.
+LOCAL_ONLY_REQUIREMENTS = ("-r", "anthropic==", "huggingface-hub==", "faster-whisper==")  # no ASR on Vercel
+# The Python files the function needs beyond translation_agent_demo/ (copied whole) and its entry point
 FUNCTION_FILES = (
     "frontend/server.py",
     "frontend/audio_align.py",
     "frontend/staged.py",
-    "frontend/quick.py",
     "frontend/request_log.py",
     "frontend/sql/request_log.sql",
     "frontend/admin_data.py",
@@ -133,9 +115,8 @@ def export_corpus(directory):
 
 
 def export_alignments(directory, snapshot="evaluation_zh_local_v1.chunks"):
-    """corpus/alignments.json: the saved audio alignments (migration 011, frontend/audio_align.py) of the
-    snapshot's chunks, which the function serves as GET /api/audio/alignment (it never aligns itself).
-    Precompute them first with python -m frontend.audio_align <chunk_id>...; none gives an empty file."""
+    """corpus/alignments.json: the saved alignments (migration 011) of the snapshot's chunks, precomputed with
+    python -m frontend.audio_align <chunk_id>...; none gives an empty file."""
     alignments = {}
     if psql("SELECT to_regclass('public.chunk_audio_alignment') IS NOT NULL").strip() == "t":
         output = psql(f"""SELECT json_build_object('chunk_id',chunk_id,'audio_url',audio_url,
@@ -149,9 +130,8 @@ def export_alignments(directory, snapshot="evaluation_zh_local_v1.chunks"):
 
 
 def stage_admin(public, *, run=None, results=None, tasks=None, systems=None, coach_system=None):
-    """Copy the admin page to public/admin and put its data beside it; returns one line on what was shipped.
-
-    An older package's data files are removed first, so a page never shows another run by mistake."""
+    """Copy the admin page to public/admin with its data (an older package's data removed first); returns one
+    line on what was shipped."""
     page = public / "admin"
     page.mkdir(parents=True, exist_ok=True)
     for name in DATA_FILES:
@@ -202,12 +182,8 @@ def vercel_config():
                 "includeFiles": "{" + ",".join(FUNCTION_DIRS) + "}/**",
             }
         },
-        # The admin page fetches data.json relative to itself: /admin must become /admin/.
         "redirects": [{"source": "/admin", "destination": "/admin/", "permanent": False}],
-        # The live request log, the mode switch and the audio alignments are the function's (it routes on the
-        # original path).
         "rewrites": [{"source": source, "destination": "/api/search"} for source in FUNCTION_PATHS],
-        # /admin is open to anyone with the address (D4) but kept out of search engines, its data included.
         "headers": [{"source": source, "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
                     for source in ADMIN_PATHS],
     }
@@ -221,7 +197,7 @@ def size(path):
 
 
 def size_report(target):
-    """Bytes of the static files and of the function's own files (Vercel adds the installed requirements)."""
+    """Bytes of the static files and the function's own files (without the installed requirements)."""
     target = Path(target)
     return {
         "public": size(target / "public"),

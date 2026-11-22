@@ -1,14 +1,10 @@
-"""The live request log and the coach mode switch, kept in PostgreSQL (Neon on Vercel, Docker locally).
-
-    database   COACH_LOG_DATABASE_URL > DATABASE_URL > POSTGRES_URL; none: no rows are written and the mode
-               comes from the environment only. The local server also reads translation_agent_demo/.env.
-    tables     frontend/sql/request_log.sql, run when the server starts (CREATE TABLE IF NOT EXISTS)
-    mode       coach_settings['coach_system'] > COACH_SYSTEM > agent, cached 10 s per process; a database
-               error falls back to the environment's value for the next 10 s
-
-Every call opens one short connection (connect 3 s, statements 3 s, no retry). Writing a log row never
-raises: a failure prints one line with the error's type only (no URL, no learner text), and the learner's
-answer is already sent when a row is written (frontend/server.py).
+"""The live request log, the coach mode switch and the daily request cap in PostgreSQL: COACH_LOG_DATABASE_URL >
+DATABASE_URL > POSTGRES_URL (none: no rows; the mode comes from the environment). The tables
+(frontend/sql/request_log.sql) are created at start. Mode: coach_settings['coach_system'] > COACH_SYSTEM > agent,
+cached 10 s (a database error keeps the environment's). Daily cap (DailyLimit): COACH_DAILY_LIMIT requests a day
+for everyone together, counted in coach_daily_usage per COACH_DAILY_TZ day; with a cap and no database every
+request is refused. One short connection per call (3 s timeouts, no retry); saving never raises and logs only
+the error's type (no URL, no learner text).
 """
 
 from __future__ import annotations
@@ -18,9 +14,10 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 from psycopg import sql
@@ -42,6 +39,10 @@ LOG_COLUMNS = ("mode", "mode_source", "transport", "status", "error_code", "ques
                "added_final", "verified_final", "continuation", "result")
 ZERO_DEFAULTS = ("total_ms", "llm_calls", "searches", "input_tokens", "output_tokens", "added_final")
 RESULT_EXCLUDE = {"answer", "tool_calls"}  # the rendered answer repeats the expressions; the log counts searches
+DAILY_LIMIT_ENV, DAILY_TZ_ENV, DEFAULT_DAILY_TZ = "COACH_DAILY_LIMIT", "COACH_DAILY_TZ", "Asia/Seoul"
+MAX_DAILY_LIMIT = 1_000_000
+# Zones without daylight saving time, for a runtime without a time zone database (Python has no tzdata built in)
+FIXED_ZONES = {"UTC": 0, "Etc/UTC": 0, "Asia/Seoul": 9, "Asia/Tokyo": 9, "Asia/Shanghai": 8}
 
 
 class StoreError(Exception):
@@ -49,30 +50,15 @@ class StoreError(Exception):
 
 
 def database_url(environ: Mapping[str, str]) -> str | None:
-    for name in URL_VARIABLES:
-        value = (environ.get(name) or "").strip()
-        if value:
-            return value
-    return None
+    return next((value for name in URL_VARIABLES if (value := (environ.get(name) or "").strip())), None)
 
 
 def _iso(value) -> str | None:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds") if isinstance(value, datetime) else None
 
 
-def result_json(result) -> dict | None:
-    """What the admin conversion needs of a RunResult (trace, expressions, usage, status...); None otherwise."""
-    dump = getattr(result, "model_dump", None)
-    if not callable(dump):
-        return None
-    try:
-        return dump(mode="json", exclude=RESULT_EXCLUDE)
-    except Exception:
-        return None
-
-
 class RequestStore:
-    """The three tables behind one database URL; disabled (url None) when no database is configured."""
+    """The four tables behind one database URL; disabled (url None) when no database is configured."""
 
     def __init__(self, url: str | None = None, *, password: str | None = None, schema: str | None = None,
                  log: Callable[[str], None] | None = None, clock: Callable[[], float] = time.monotonic):
@@ -86,8 +72,8 @@ class RequestStore:
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None, env_file: Path | None = None,
                          **kwargs) -> "RequestStore":
-        """The URL from URL_VARIABLES (os.environ, over env_file's values when one is given). A URL without a
-        password takes PGPASSWORD or POSTGRES_PASSWORD, like translation_agent_demo/storage/postgres.py."""
+        """The URL from os.environ over env_file's values. One without a password takes PGPASSWORD or
+        POSTGRES_PASSWORD, like translation_agent_demo/storage/postgres.py."""
         values: dict[str, str] = {}
         if env_file is not None:
             try:
@@ -105,9 +91,8 @@ class RequestStore:
             embedded = parsed.password
         except ValueError:
             valid, embedded = False, None
-        store = cls(url if valid else None,
-                    password=None if embedded is not None else (values.get("PGPASSWORD") or values.get("POSTGRES_PASSWORD") or None),
-                    **kwargs)
+        password = values.get("PGPASSWORD") or values.get("POSTGRES_PASSWORD") or None
+        store = cls(url if valid else None, password=None if embedded is not None else password, **kwargs)
         if not valid:
             store.log(json.dumps({"event": "coach_request_log_disabled", "reason": "invalid_database_url"}))
         return store
@@ -116,7 +101,10 @@ class RequestStore:
     def enabled(self) -> bool:
         return self.url is not None
 
-    # ------------------------------------------------------------ connections
+    def _error(self, step: str, exc: Exception) -> None:
+        self.log(json.dumps({"event": "coach_request_log_error", "step": step,
+                             "error": str(exc) if isinstance(exc, StoreError) else type(exc).__name__}))
+
     def _transaction(self, work):
         """work(conn) in one transaction with a statement timeout; StoreError on any failure."""
         if not self.enabled:
@@ -137,7 +125,7 @@ class RequestStore:
             raise StoreError(type(exc).__name__) from None
 
     def ensure(self) -> bool:
-        """Create the tables once per process (frontend/sql/request_log.sql); False while that fails."""
+        """Create the tables once per process; False while that fails (retried after ENSURE_RETRY_SECONDS)."""
         if not self.enabled:
             return False
         with self._lock:
@@ -150,8 +138,7 @@ class RequestStore:
                 self._transaction(lambda conn: conn.execute(script))
             except (OSError, StoreError) as exc:
                 self._retry_at = self.clock() + ENSURE_RETRY_SECONDS
-                self.log(json.dumps({"event": "coach_request_log_error", "step": "ensure",
-                                     "error": str(exc) if isinstance(exc, StoreError) else type(exc).__name__}))
+                self._error("ensure", exc)
                 return False
             self._ready = True
             return True
@@ -160,13 +147,28 @@ class RequestStore:
         if not self.ensure():
             raise StoreError("no_database" if not self.enabled else "unavailable")
 
+    def _fetch(self, query: str, params: tuple, *, one: bool = False):
+        """The rows (or the first row) of one query once the tables exist; StoreError on failure."""
+        self._ready_or_raise()
+
+        def work(conn):
+            cursor = conn.execute(query, params)
+            return cursor.fetchone() if one else cursor.fetchall()
+        return self._transaction(work)
+
     # ------------------------------------------------------------ the request log
     def row(self, record: Mapping, question: str | None, result) -> dict:
-        """One coach_request_log row from the server's log record (frontend/server.py log_record)."""
+        """One coach_request_log row from the server's log record (frontend/server.py log_record) and the
+        RunResult (what the admin conversion needs: not its rendered answer, None when it cannot be dumped)."""
         row = {name: record.get(name) for name in LOG_COLUMNS}
         if isinstance(question, str):
             question = question.replace("\x00", "")  # PostgreSQL text cannot hold NUL (an invalid_input request may)
-        row.update(question=question, result=result_json(result))
+        dump = getattr(result, "model_dump", None)
+        try:
+            dumped = dump(mode="json", exclude=RESULT_EXCLUDE) if callable(dump) else None
+        except Exception:
+            dumped = None
+        row.update(question=question, result=dumped)
         for name in ZERO_DEFAULTS:
             row[name] = row[name] or 0
         return row
@@ -185,24 +187,19 @@ class RequestStore:
             self._transaction(lambda conn: conn.execute(query, row))
             return True
         except Exception as exc:
-            self.log(json.dumps({"event": "coach_request_log_error", "step": "insert",
-                                 "error": str(exc) if isinstance(exc, StoreError) else type(exc).__name__}))
+            self._error("insert", exc)
             return False
 
     def recent(self, limit: int = 300) -> list[dict]:
         """The newest rows first (StoreError on failure)."""
-        self._ready_or_raise()
         limit = max(1, min(int(limit), MAX_LIMIT))
-        return self._transaction(lambda conn: conn.execute(
-            "SELECT id, created_at, " + ", ".join(LOG_COLUMNS) + " FROM coach_request_log "
-            "ORDER BY created_at DESC, id DESC LIMIT %s", (limit,)).fetchall())
+        return self._fetch(f"SELECT id, created_at, {', '.join(LOG_COLUMNS)} FROM coach_request_log "
+                           "ORDER BY created_at DESC, id DESC LIMIT %s", (limit,))
 
     # ------------------------------------------------------------ the mode switch
     def mode_setting(self) -> tuple[str, datetime] | None:
         """(value, updated_at) of coach_settings['coach_system'], None when unset (StoreError on failure)."""
-        self._ready_or_raise()
-        row = self._transaction(lambda conn: conn.execute(
-            "SELECT value, updated_at FROM coach_settings WHERE key = %s", (MODE_KEY,)).fetchone())
+        row = self._fetch("SELECT value, updated_at FROM coach_settings WHERE key = %s", (MODE_KEY,), one=True)
         return None if row is None else (row["value"], row["updated_at"])
 
     def set_mode(self, mode: str, fallback: str) -> None:
@@ -223,11 +220,69 @@ class RequestStore:
 
     def history(self, limit: int = HISTORY_LIMIT) -> list[dict]:
         """The newest mode changes first: [{"at", "from", "to"}] (StoreError on failure)."""
-        self._ready_or_raise()
-        rows = self._transaction(lambda conn: conn.execute(
-            "SELECT at, from_mode, to_mode FROM coach_mode_changes ORDER BY at DESC, id DESC LIMIT %s",
-            (limit,)).fetchall())
+        rows = self._fetch("SELECT at, from_mode, to_mode FROM coach_mode_changes ORDER BY at DESC, id DESC "
+                           "LIMIT %s", (limit,))
         return [{"at": _iso(r["at"]), "from": r["from_mode"], "to": r["to_mode"]} for r in rows]
+
+    # ------------------------------------------------------------ the daily cap
+    def count_request(self, day: date) -> int:
+        """Add one to the day's coach_daily_usage count in one statement and return the new count: parallel
+        requests (any process) each get their own number (StoreError on failure)."""
+        row = self._fetch("INSERT INTO coach_daily_usage (day, count) VALUES (%s, 1) ON CONFLICT (day) "
+                          "DO UPDATE SET count = coach_daily_usage.count + 1 RETURNING count", (day,), one=True)
+        return int(row["count"])
+
+
+def day_zone(name: str) -> tzinfo:
+    """The time zone whose midnight starts a new day; ValueError for an unknown name."""
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        if name in FIXED_ZONES:
+            return timezone(timedelta(hours=FIXED_ZONES[name]), name)
+        raise ValueError(f"{DAILY_TZ_ENV} must be a time zone name such as {DEFAULT_DAILY_TZ}, not {name!r}") from None
+
+
+class DailyLimit:
+    """At most `limit` POST /api/search requests a day for all learners together, whatever the client sends:
+    each request past the access checks and the slot counts once (its quick, first and continuation steps are
+    the same request), in coach_daily_usage, the day starting at midnight in `zone`. limit None: no cap and
+    nothing counted. take() raises StoreError when the database cannot count: the caller refuses the request."""
+
+    def __init__(self, limit: int | None, store: RequestStore, *, zone: str | tzinfo = DEFAULT_DAILY_TZ,
+                 now: Callable[[], datetime] | None = None):
+        self.limit, self.store = limit, store
+        self.zone = day_zone(zone) if isinstance(zone, str) else zone
+        self.now = now or (lambda: datetime.now(timezone.utc))
+
+    @classmethod
+    def from_environment(cls, store: RequestStore, environ: Mapping[str, str] | None = None,
+                         **kwargs) -> "DailyLimit":
+        """COACH_DAILY_LIMIT (a whole number; unset or empty: no cap) and COACH_DAILY_TZ (default Asia/Seoul);
+        ValueError for another value."""
+        environ = os.environ if environ is None else environ
+        value = (environ.get(DAILY_LIMIT_ENV) or "").strip()
+        if not value:
+            return cls(None, store, **kwargs)
+        if not (value.isascii() and value.isdigit()) or int(value) > MAX_DAILY_LIMIT:
+            raise ValueError(f"{DAILY_LIMIT_ENV} must be a whole number from 0 to {MAX_DAILY_LIMIT}, not {value!r}")
+        zone = (environ.get(DAILY_TZ_ENV) or "").strip() or DEFAULT_DAILY_TZ
+        return cls(int(value), store, zone=zone, **kwargs)
+
+    @property
+    def enabled(self) -> bool:
+        return self.limit is not None
+
+    def today(self) -> date:
+        return self.now().astimezone(self.zone).date()
+
+    def take(self) -> tuple[bool, int]:
+        """Count one request today: (within the cap, requests left after it)."""
+        count = self.store.count_request(self.today())
+        return count <= self.limit, max(0, self.limit - count)
+
+    def describe(self) -> str:
+        return "off" if self.limit is None else f"{self.limit} requests a day ({self.zone})"
 
 
 class ModeSwitch:

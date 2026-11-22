@@ -14,7 +14,8 @@ is AgentPipeline(locked=False); it is not registered, so it runs only when passe
 from .agent import AgentPipeline
 from .base import CONTINUATION_BUDGET, ExpressionPipeline, locked_slots
 from .baseline import BaselinePipeline
-from .first_stage import FIRST_STAGE_BUDGET, run_first_stage
+from .first_stage import (FAST_FIRST_STAGE, FIRST_STAGE_BUDGET, FULL_FIRST_STAGE, FirstStageSettings,
+                          run_first_stage)
 
 # The two systems, in the order results are reported; the agent is the locked one.
 SYSTEMS: dict[str, ExpressionPipeline] = {p.name: p for p in (BaselinePipeline(), AgentPipeline())}
@@ -27,4 +28,5 @@ def system_for(name: str) -> ExpressionPipeline:
 
 
 __all__ = ["SYSTEMS", "system_for", "ExpressionPipeline", "BaselinePipeline", "AgentPipeline", "run_first_stage",
-           "FIRST_STAGE_BUDGET", "CONTINUATION_BUDGET", "locked_slots"]
+           "FIRST_STAGE_BUDGET", "CONTINUATION_BUDGET", "locked_slots", "FirstStageSettings", "FULL_FIRST_STAGE",
+           "FAST_FIRST_STAGE"]

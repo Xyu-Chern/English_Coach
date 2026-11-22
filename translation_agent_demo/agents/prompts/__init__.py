@@ -8,7 +8,8 @@ guaranteed; the prose states the limits the schema cannot express (string length
 The prompts hold no wording, idiom or situation from the evaluation tasks: rules are
 stated in general terms, so a score cannot come from text the prompt already contains.
 
-    prefix.py     CANDIDATES_PROMPT, SELECT_PROMPT (the shared first stage; SELECT also in baseline rounds)
+    prefix.py     CANDIDATES_PROMPT, SELECT_PROMPT (the shared first stage; SELECT also in baseline rounds),
+                  and their compact versions (the app's fast first stage, not evaluated)
     baseline.py   REVISE_PROMPT: one fixed revision per round
     agent.py      AGENT_LOCKED_PROMPT (the default agent, verified-slot lock) and AGENT_PROMPT
                   (the submission agent, locked=False): every turn, and the pick-only final call
@@ -20,6 +21,8 @@ tests/test_frozen.py pins every prompt, so a change to what the model reads is a
 
 from .agent import AGENT_LOCKED_PROMPT, AGENT_PROMPT
 from .baseline import REVISE_PROMPT
-from .prefix import CANDIDATES_PROMPT, SELECT_PROMPT
+from .prefix import (CANDIDATES_COMPACT_PROMPT, CANDIDATES_PROMPT, SELECT_COMPACT_PROMPT, SELECT_PROMPT,
+                     compact_candidates_prompt)
 
-__all__ = ["CANDIDATES_PROMPT", "SELECT_PROMPT", "REVISE_PROMPT", "AGENT_PROMPT", "AGENT_LOCKED_PROMPT"]
+__all__ = ["CANDIDATES_PROMPT", "SELECT_PROMPT", "REVISE_PROMPT", "AGENT_PROMPT", "AGENT_LOCKED_PROMPT",
+           "CANDIDATES_COMPACT_PROMPT", "SELECT_COMPACT_PROMPT", "compact_candidates_prompt"]

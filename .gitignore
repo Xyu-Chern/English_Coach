@@ -1,0 +1,14 @@
+# Secrets and deploy links never go into the repository (the folders' own .gitignore files add more).
+.env*
+!.env.example
+.vercel/
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# Local data and Python caches
+frontend/.local/
+__pycache__/
+*.pyc

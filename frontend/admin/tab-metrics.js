@@ -1,29 +1,24 @@
 /* 3. 지표 — 소요시간과 토큰의 p50 · p95 · p99(nearest-rank). 최종 시간은 두 모드가 모두 후속을 실행한
-   같은 평가 단위로만 비교한다(data.js의 POP · stats.same). */
-import { $, NEED, fill, fmtK, fmtN, h, icon, nr, pct, rootPx, sec, secU, sv, usd } from "./ui.js";
-import { D, DIST, MODES, POP, SIZE, ST, firstTok, getTraces, lockWord, retryTraces } from "./data.js";
-import { foot, hscroll, modeBadge, onSeg, phead, popNote, runBar, seg, syncSeg, warnErr } from "./parts.js";
-import { register, rerender } from "./shell.js";
+   같은 평가 단위로만 비교한다(admin.js의 POP · stats.same). 문구는 "metrics.*". */
+import {
+  $, D, DIST, MODES, NEED, POP, SIZE, ST, fill, firstTok, fmtK, fmtN, foot, getTraces, h, hscroll, icon, kRow, kpi,
+  lockWord, modeBadge, nEq, nr, onSeg, pct, phead, popNote, rerender, retryTraces, rootPx, runBar, sec, secU, seg,
+  sv, syncSeg, usd, warnErr,
+} from "./admin.js";
 import { t, tx } from "./i18n.js";
-import "./i18n-tabs.js";
-
-/* 화면 문자열: i18n-tabs.js의 "metrics.*" 키 */
-const T = (k, p) => t("metrics." + k, p);
-const TX = (k, p) => tx("metrics." + k, p);
-const n = k => `n=${fmtN(k)}`;
+const T = (k, p) => t("metrics." + k, p), TX = (k, p) => tx("metrics." + k, p);
 const tickSec = v => t("unit.sec", { n: fmtN(v) });
-
 let MD = null; /* 모드별 묶음 + 첫 단계 토큰(ftok, trace 필요) */
 let trend = "time"; /* 회차별 비교: time | tok */
-
-register("metrics", async panel => {
+export async function render(panel) {
   fill(panel, h("p.loading", T("loading")));
   let tErr = null;
   await getTraces().catch(e => (tErr = e));
   MD = Object.fromEntries(MODES.map(m => [m, { ...ST[m], ftok: tErr ? [] : ST[m].ok.map(r => firstTok(r.id)) }]));
-  const okN = MD.baseline.ok.length + MD.agent.ok.length;
-  const b = v => h("b", fmtN(v));
+  const okN = MD.baseline.ok.length + MD.agent.ok.length, b = v => h("b", fmtN(v));
   const split = k => ({ b: fmtN(MD.baseline[k].length), a: fmtN(MD.agent[k].length) });
+  const card = (cls, id, ic, title, ...body) =>
+    h("section.card." + cls, { "aria-labelledby": id }, h("h3", { id }, icon(ic), ...title), ...body);
   fill(panel,
     phead(T("title"), T("lead")),
     runBar(),
@@ -36,14 +31,11 @@ register("metrics", async panel => {
       h("span", TX("cFinal", { n: b(POP.common) }))),
     h("div.kpis", kpis()),
     h("div.mgrid",
-      h("section.card.m-box", { "aria-labelledby": "h-box" },
-        h("h3", { id: "h-box" }, icon("chart"), T("boxTitle"), h("small", T("boxSmall"))),
+      card("m-box", "h-box", "chart", [T("boxTitle"), h("small", T("boxSmall"))],
         h("div.box-host", { id: "boxchart" }), h("p.legend", boxLegend())),
-      h("section.card.m-tbl", { "aria-labelledby": "h-pct" },
-        h("h3", { id: "h-pct" }, icon("list"), T("pctTitle")), hscroll(pctTable(), "pcttbl", T("pctTitle")), pctFoot()),
-      h("section.card.m-trend", { "aria-labelledby": "h-trend" },
-        h("h3", { id: "h-trend" }, icon("clock"), h("span", { id: "trendTitle" }, T("trendTitle")),
-          h("small", T("trendSmall"))),
+      card("m-tbl", "h-pct", "list", [T("pctTitle")], hscroll(pctTable(), "pcttbl", T("pctTitle")), pctFoot()),
+      card("m-trend", "h-trend", "clock",
+        [h("span", { id: "trendTitle" }, T("trendTitle")), h("small", T("trendSmall"))],
         h("div.trend-tools", seg("mf-trend", T("trendMetric"), [["time", T("trendTime")], ["tok", T("trendTok")]],
           v => trend === v), h("span.muted.num", { id: "trendBucket" })),
         h("div.trend", { id: "trend" }), h("p.legend", { id: "trendlegend" }))));
@@ -52,33 +44,26 @@ register("metrics", async panel => {
     syncSeg($("#mf-trend"), x => x === trend);
     drawTrend();
   });
-}, () => {
-  drawBox();
-  drawTrend();
-});
-
+}
+export function dyn() {
+  drawBox(); drawTrend();
+}
 function kpis() {
-  const both = ["agent", "baseline"];
-  const at = (a, q, f) => {
-    const v = nr(a, q);
-    return v == null ? "—" : f(v);
-  };
-  const kRow = (m, v, k) => h("div.kr", modeBadge(m), h("span.v.num", v), h("span.n.num", k));
-  const kpi = (title, rows, ...sub) => h("div.kpi", h("h3", title), rows, h("p.sub", ...sub));
-  const per = f => both.map(m => `${m} ${f(MD[m])}`).join(" · ");
-  const v3 = MD.agent.v3ran.length;
+  const both = ["agent", "baseline"], at = (a, q, f) => { const v = nr(a, q); return v == null ? "—" : f(v); };
+  const per = f => both.map(m => `${m} ${f(MD[m])}`).join(" · "), v3 = MD.agent.v3ran.length;
   return [
-    kpi(T("kFirst"), both.map(m => kRow(m, at(MD[m].first, 50, secU), n(MD[m].first.length))), T("kFirstSub")),
+    kpi(T("kFirst"), both.map(m => kRow(m, at(MD[m].first, 50, secU), nEq(MD[m].first.length))), T("kFirstSub")),
     kpi(T("kFinal"),
-      both.map(m => kRow(m, at(MD[m].final, 50, secU), `p95 ${at(MD[m].final, 95, secU)} · ${n(MD[m].final.length)}`)),
+      both.map(m =>
+        kRow(m, at(MD[m].final, 50, secU), `p95 ${at(MD[m].final, 95, secU)} · ${nEq(MD[m].final.length)}`)),
       T("kFinalSub", { n: fmtN(POP.common) }), T("kFinalTotal", { per: per(x => at(x.total, 95, secU)) })),
     kpi(T("kSkip"), both.map(m => {
-      const { skip, ok } = MD[m];
-      return kRow(m, ok.length ? pct(skip, ok.length) + "%" : "—", `${fmtN(skip)}/${T("cases", { k: fmtN(ok.length) })}`);
+      const { skip, ok } = MD[m], n = `${fmtN(skip)}/${T("cases", { k: fmtN(ok.length) })}`;
+      return kRow(m, ok.length ? pct(skip, ok.length) + "%" : "—", n);
     }),
     T("kSkipSub", { c3: fmtN(DIST.c3), n: fmtN(DIST.n), p: pct(DIST.c3, DIST.n) }),
     v3 ? [" ", h("b", T("kSkipV3", { k: fmtN(v3), w: lockWord() }))] : null),
-    kpi(T("kTok"), both.map(m => kRow(m, at(MD[m].ttok, 50, fmtN), n(MD[m].ttok.length))),
+    kpi(T("kTok"), both.map(m => kRow(m, at(MD[m].ttok, 50, fmtN), nEq(MD[m].ttok.length))),
       T("kTokSub", {
         cost: per(x => usd(x.cost)), d: fmtN(MD.agent.dcl + MD.baseline.dcl), e: fmtN(MD.agent.err + MD.baseline.err),
       })),
@@ -105,16 +90,16 @@ function measureText(txt, cls) {
 const boxStats = a => ({ n: a.length, p5: nr(a, 5), p25: nr(a, 25), p50: nr(a, 50), p75: nr(a, 75), p95: nr(a, 95),
   p99: nr(a, 99) });
 const COL = { agent: ["#4938af", "#e6e1fa"], baseline: ["#0f6e66", "#d3ede8"] };
-/* 제목 · 행 이름은 그릴 때 지금 언어로 읽는다(getter · 키) */
+/* 제목 · 행 이름은 그릴 때 지금 언어로 읽는다(getter · 키). 서식 함수도 그릴 때 부른다(admin.js와 순환 import) */
 const FACETS = [
   { key: "time", get title() { return T("facetTime"); }, ic: "clock",
-    get: (m, s) => (s === "first" ? MD[m].first : MD[m].final), fmt: sec, tick: v => tickSec(Math.round(v / 1000)) },
+    get: (m, s) => (s === "first" ? MD[m].first : MD[m].final), fmt: v => sec(v),
+    tick: v => tickSec(Math.round(v / 1000)) },
   { key: "tok", get title() { return T("facetTok"); }, ic: "spark",
-    get: (m, s) => (s === "first" ? MD[m].ftok : MD[m].rtok), fmt: fmtK, tick: fmtK },
+    get: (m, s) => (s === "first" ? MD[m].ftok : MD[m].rtok), fmt: v => fmtK(v), tick: v => fmtK(v) },
 ];
 const BOX_ROWS = [["baseline", "first", "rowFirst"], ["baseline", "final", "rowFinal"],
   ["agent", "first", "rowFirst"], ["agent", "final", "rowFinal"]];
-
 function boxVals(f, b) {
   const d95 = b.n < NEED(95), d99 = b.n < NEED(99);
   return h("p.bx-vals.num", h("span", "p50 ", h("b", f.fmt(b.p50))),
@@ -122,9 +107,8 @@ function boxVals(f, b) {
       "p95 ", h("b", f.fmt(b.p95)), d95 ? T("p95Ref") : ""),
     h("span" + (d99 ? ".dim" : ""), { title: d99 ? T("p99Tip", { n: fmtN(b.n), need: fmtN(NEED(99)) }) : null },
       d99 && icon("alert"), "p99 ", h("b", f.fmt(b.p99))),
-    h("span.vn", n(b.n)));
+    h("span.vn", nEq(b.n)));
 }
-
 function drawBox() {
   const host = $("#boxchart");
   if (!host || !host.offsetParent || !MD) return;
@@ -146,7 +130,6 @@ function drawBox() {
       ft(f, true), BOX_ROWS.map(([m, s, l]) => [lab(m, l), cell(f, m, s)]), h("div"), axis(f))));
   for (const f of FACETS) drawFacet(host, f, px);
 }
-
 function drawFacet(host, f, px) {
   const axis = host.querySelector(`.bx-axis[data-f="${f.key}"]`), cw = axis.clientWidth;
   if (!cw) return;
@@ -156,8 +139,7 @@ function drawFacet(host, f, px) {
   /* 눈금 글자가 겹치지 않게: 간격이 가장 넓은 글자의 1.6배보다 좁으면 건너뛰어 붙인다(눈금선은 모두 그림) */
   const lw = Math.max(...ticks.map(v => measureText(f.tick(v), "tick")));
   const every = Math.max(1, Math.ceil((lw * 1.6) / (span / (ticks.length - 1))));
-  const shift = i =>
-    i === 0 ? -pad + "px" : i === ticks.length - 1 ? `calc(-100% + ${pad}px)` : "-50%";
+  const shift = i => (i === 0 ? -pad + "px" : i === ticks.length - 1 ? `calc(-100% + ${pad}px)` : "-50%");
   fill(axis, ticks.map((v, i) => (i % every ? null
     : h("span.tick.num", { css: { left: X(v) + "px", transform: `translateX(${shift(i)})` } }, f.tick(v)))));
   for (const c of host.querySelectorAll(`.bx-cell[data-f="${f.key}"]`)) {
@@ -189,7 +171,6 @@ function drawFacet(host, f, px) {
     fill(c.querySelector(".bx-plot"), sv("svg", { width: cw, height: plotH, "aria-hidden": "true" }, g));
   }
 }
-
 /* 범례 기호(작은 SVG) */
 const GLYPHS = {
   box: [["rect", { x: 3, y: 3, width: 16, height: 8, rx: 2, fill: "#e6e1fa", stroke: "#4938af", "stroke-width": 1.5 }]],
@@ -213,10 +194,9 @@ const boxLegend = () => [
   item(icon("alert"), T("lgSmall", { a: fmtN(NEED(95)), b: fmtN(NEED(99)) })),
 ];
 
-/* ---------- 퍼센타일 표 ---------- */
-/* [데이터 키, 이름 키(+ "Sub" = 설명), 서식] */
-const PCT_ROWS = [["first", "pFirst", secU], ["final", "pFinal", secU], ["total", "pTotal", secU],
-  ["bg", "pBg", secU], ["ftok", "pFtok", fmtN], ["ttok", "pTtok", fmtN]];
+/* ---------- 퍼센타일 표: [데이터 키, 이름 키(+ "Sub" = 설명), 토큰이면 true] ---------- */
+const PCT_ROWS = [["first", "pFirst"], ["final", "pFinal"], ["total", "pTotal"], ["bg", "pBg"], ["ftok", "pFtok", 1],
+  ["ttok", "pTtok", 1]];
 function pctTable() {
   const cellP = (a, q, f) => {
     const v = nr(a, q);
@@ -235,9 +215,10 @@ function pctTable() {
   const head = [T("pHMetric"), T("pHMode"), "n", "p50", "p95", "p99", T("pHMax")];
   return h("table.pct",
     h("thead", h("tr", head.map(x => h("th", x)))),
-    h("tbody", PCT_ROWS.map(([k, key, f]) => {
+    h("tbody", PCT_ROWS.map(([k, key, tok]) => {
       const label = T(key);
-      return [h("tr.grp", h("td", { colspan: 7 }, `${label} · ${T(key + "Sub")}`)), MODES.map(row(k, label, f))];
+      return [h("tr.grp", h("td", { colspan: 7 }, `${label} · ${T(key + "Sub")}`)),
+        MODES.map(row(k, label, tok ? fmtN : secU))];
     })));
 }
 function pctFoot() {
@@ -260,7 +241,6 @@ function trendStats(runs, tok) {
     return o;
   });
 }
-
 function drawTrend() {
   const host = $("#trend");
   if (!host || !host.offsetParent || !MD) return;
@@ -269,8 +249,7 @@ function drawTrend() {
   $("#trendTitle").textContent = T(tok ? "trendHeadTok" : "trendHeadTime");
   $("#trendBucket").textContent = T("bucket", { k: fmtN(runs.length) });
   if (!runs.length) {
-    fill(host, h("p.empty", T("noRequests")));
-    fill($("#trendlegend"));
+    fill(host, h("p.empty", T("noRequests"))); fill($("#trendlegend"));
     return;
   }
   const st = trendStats(runs, tok), plotH = 8 * px;

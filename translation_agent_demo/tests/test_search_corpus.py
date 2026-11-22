@@ -1,6 +1,6 @@
 """Tool contract checks without PostgreSQL or external provider requests."""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 import json
 from uuid import UUID
@@ -168,6 +168,24 @@ class SearchCorpusTests(unittest.TestCase):
                 second = search.call_args_list[1]
                 self.assertIs(first.args[1], second.args[1])
                 self.assertEqual({k: v for k, v in first.kwargs.items() if k != "literal_phrase"}, second.kwargs)
+
+    def test_an_uncapped_literal_search_counts_its_own_rows_instead_of_the_corpus(self):
+        args = tool.SearchCorpusArgs(query="thank the host", literal_phrase="for inviting", limit=3)
+        partial = replace(self._row(2), text="Thanks for invitingly long words.")
+        for rows, mode, expected, counted in [((self._row(1), partial), "literal", 1, False),  # whole words only
+                                              ((), "semantic_fallback", 0, False),
+                                              ((self._row(1), self._row(3), self._row(4)), "literal", 9, True)]:
+            with self.subTest(rows=len(rows)), patch.object(tool, "has_searchable_corpus", return_value=True), \
+                    patch.object(tool, "count_literal_chunks", return_value=9) as count, \
+                    patch.object(tool, "search_chunks", side_effect=[rows, (self._row(5),)]):
+                result = tool.search_corpus(args, conn=self.conn, embeddings=FixedEmbeddings())
+            self.assertEqual((result.search_mode, result.literal_corpus_count), (mode, expected))
+            self.assertEqual(count.called, counted)  # a full page (limit reached) may hide more: count them
+
+    def test_query_text_is_what_a_search_embeds(self):
+        self.assertEqual(tool.query_text(tool.SearchCorpusArgs(query="hi")), "hi")
+        self.assertEqual(tool.query_text(tool.SearchCorpusArgs(query="hi", context="a meeting")),
+                         "Expression or meaning: hi\nContext: a meeting")
 
     def test_embedding_failures_are_not_reported_as_empty_results(self):
         cases = ((EmbeddingError("Provider unavailable"), "embedding_unavailable"),

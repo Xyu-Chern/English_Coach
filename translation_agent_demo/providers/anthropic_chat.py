@@ -12,6 +12,7 @@ default cap is generous. Settings.effort, when set, becomes output_config.effort
 
 import anthropic
 
+from ..agents.systems.parallel_first_stage import TEXT_LISTENER
 from ..config import Settings
 from ..errors import ConfigurationError, ModelProviderError
 from .protocol import ChatCompletion, ModelUsage
@@ -65,12 +66,29 @@ class AnthropicChatModel:
                             response_format: dict | None = None) -> ChatCompletion:
         request = self._request(system_prompt, user_payload, response_format)
         try:
-            message = self._client.messages.create(**request)
+            message = self._send(request)
         except anthropic.APIStatusError as exc:
             raise _status_error(exc) from exc
         except anthropic.APIError as exc:  # connection, timeout or an unreadable response
             raise ClaudeCallError("model_unavailable", f"Could not reach the Claude API ({type(exc).__name__}).") from exc
         return self._completion(message)
+
+    def _send(self, request: dict):
+        """messages.create, or the same request streamed when this thread listens (parallel_first_stage.listening):
+        the listener gets the text so far after each piece, and its own failure never fails the call."""
+        listen = TEXT_LISTENER.get()
+        stream = getattr(self._client.messages, "stream", None)
+        if listen is None or not callable(stream):
+            return self._client.messages.create(**request)
+        with stream(**request) as events:
+            text = ""
+            for piece in events.text_stream:
+                text += piece
+                try:
+                    listen(text)
+                except Exception:
+                    pass
+            return events.get_final_message()
 
     def _request(self, system_prompt: str, user_payload: str, response_format: dict | None) -> dict:
         request = {"model": self._settings.model, "max_tokens": self._max_tokens, "system": system_prompt,

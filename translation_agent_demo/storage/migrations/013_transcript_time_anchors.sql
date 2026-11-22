@@ -1,11 +1,11 @@
--- Time anchors: transcript positions with a known audio time (storage/time_anchors.py).
--- Written by jobs/extract_time_anchors.py from inline markers the publisher left in the text, e.g.
+-- Time anchors: transcript positions with a known audio time (storage/episode_audio.py).
+-- Written by `jobs/podcast_audio.py anchors` from inline markers the publisher left in the text, e.g.
 -- "[08:24]" or "[01:04:02.14]" (raw Markdown "\[08:24\]"): the audio time where the next paragraph starts.
 --   char_offset  document offset in the coordinates of build_id: a position in the concatenation of that
 --                build's cue texts with no separator, "".join(cue->>'text' for cue in corpus_builds.cues),
 --                i.e. the char_start/char_end/char_total the audio estimate computes
 --                (storage/episode_audio.py audio_clips_for_chunks). Quote offsets are chunk-relative; map
---                them with time_anchors.chunk_to_document_offset before interpolating.
+--                them with episode_audio.chunk_to_document_offset before interpolating.
 --   time_ms      audio time at that offset (ms)
 --   source       'inline_marker'        publisher marker; char_offset = first character after it
 --                'segment_start'        a marker-only cue labelled Break/Outro/Jingle/...: untranscribed

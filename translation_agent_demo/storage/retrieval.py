@@ -120,6 +120,13 @@ def literal_word_pattern(phrase: str) -> str:
     return pattern
 
 
+def contains_pattern(phrase: str) -> str:
+    """ILIKE pattern for chunks containing the phrase anywhere, case-insensitively (what strpos(lower, lower)
+    matched). LIKE's own characters are escaped so the phrase is matched as text; unlike strpos, an ILIKE can
+    use the trigram index of migration 011."""
+    return "%" + phrase.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def count_literal_chunks(
     conn: psycopg.Connection,
     literal_phrase: str,
@@ -286,7 +293,7 @@ def search_chunks(
                     JOIN public.corpus_embeddings AS e USING (chunk_id)
                     WHERE e.model = %s AND e.dimensions = %s
                       AND (%s::uuid[] IS NULL OR b.document_id = ANY(%s::uuid[]))
-                      AND (%s::text IS NULL OR strpos(lower(c.text), lower(%s::text)) > 0)
+                      AND (%s::text IS NULL OR c.text ILIKE %s::text)
                     ORDER BY similarity DESC, c.chunk_id
                     LIMIT %s
                 )
@@ -310,7 +317,8 @@ def search_chunks(
                 WHERE (%s::double precision IS NULL OR r.similarity >= %s)
                 ORDER BY r.similarity DESC, r.chunk_id
                 """,
-                parameters + (encoded_vector, model, dimensions, documents, documents, literal_phrase, literal_phrase,
+                parameters + (encoded_vector, model, dimensions, documents, documents, literal_phrase,
+                              None if literal_phrase is None else contains_pattern(literal_phrase),
                               limit, min_similarity, min_similarity),
             ).fetchall()
         return tuple(_retrieved_chunk(row) for row in rows)

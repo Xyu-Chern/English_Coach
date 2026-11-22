@@ -1,32 +1,19 @@
-/* 2. 요청 로그 — '실제 요청 / 평가 기록' 전환(PR④). 평가 기록 = data.json(D5), 실제 요청 = 서버 requests.json(최신순).
-   두 기록 모두 같은 표 · 필터 · 상세를 쓰고 실행 그래프로 열린다. 사용자 열·필터 없음(D3). */
-import { $, $$, fill, fmtK, fmtN, h, icon, pct, sec, secU, shortId, sum, usd, utc } from "./ui.js";
+/* 2. 요청 로그 — 실제 요청(서버 requests.json, 최신순) / 평가 기록(data.json, D5) 전환. 같은 표 · 필터 · 상세를 쓰고
+   실행 그래프로 열린다. 사용자 열·필터 없음(D3). 문구는 "logs.*" · "live.*". */
 import {
-  D, LIVE, REQ, answersOf, firstTok, getTraces, isNotice, loadLive, lockWord, lostFirst, noEx, order, pairOf,
-  retryTraces, spansOf, contKey,
-} from "./data.js";
-import {
-  CONT_TIP, STATUS, chip, contChip, dots, enT, exPlain, exText, foot, h4, hsHint, judgeText, kv, lostTag, modeBadge,
-  mono, onSeg, phead, runBar, seg, slotTag, statusBadge, syncSeg, timeBar, warnErr,
-} from "./parts.js";
-import { register, rerender, updateLayout } from "./shell.js";
+  $, $$, CONT_TIP, D, LIVE, REQ, STATUS, STATUSES, answersOf, chip, contChip, contKey, dots, enT, exPlain, exText,
+  fill, firstTok, fmtK, fmtN, foot, getTraces, h, h4, hsHint, icon, isNotice, judgeText, kv, loadLive, lockWord,
+  lostFirst, lostTag, modeBadge, mono, noEx, onSeg, order, pairOf, pct, phead, rerender, retryTraces, runBar, sec,
+  secU, seg, shortId, slotTag, spansOf, statusBadge, sum, syncSeg, timeBar, updateLayout, usd, utc, warnErr,
+} from "./admin.js";
 import { openGraph } from "./tab-graph.js";
 import { t, tx } from "./i18n.js";
-import "./i18n-tabs.js";
-import "./i18n-live.js";
-
-/* 화면 문자열: i18n-tabs.js의 "logs.*" 키(공용 조각은 "parts.*"), 실제 요청은 i18n-live.js의 "live.*" */
-const T = (k, p) => t("logs." + k, p);
-const TX = (k, p) => tx("logs." + k, p);
-const LV = (k, p) => t("live." + k, p);
+const T = (k, p) => t("logs." + k, p), TX = (k, p) => tx("logs." + k, p), LV = (k, p) => t("live." + k, p);
 /* 지금 보는 기록: "eval" | "live"(?src=live로 시작 가능). 탭을 다시 그려도 유지된다. */
 let SRC = new URLSearchParams(location.search).get("src") === "live" ? "live" : "eval";
 let focusSrc = false;
-const rowsOf = () => (SRC === "live" ? LIVE.rows : D.requests);
-const when = r => utc(r.created_at || r.started_at);
-const SEC = () => t("parts.secUnit");
-const attempt = k => t("parts.attempt", { k });
-
+const rowsOf = () => (SRC === "live" ? LIVE.rows : D.requests), when = r => utc(r.created_at || r.started_at);
+const SEC = () => t("parts.secUnit"), attempt = k => t("parts.attempt", { k });
 /* 예문 필터: [값, 이름 키, 조건] */
 const ADD_FILTERS = [
   ["all", "all", () => true],
@@ -37,68 +24,51 @@ const ADD_FILTERS = [
   ["lost", "add.lost", r => r.lost_first > 0],
 ];
 const PAGE = 100; /* 요청 표는 100행씩 그린다(300행을 한 번에 그리면 DOM이 커짐) */
-const STATUSES = ["ok", "declined", "error"];
 let L = null; /* 필터 · 정렬 · 고른 행 */
-
-const taskEl = id => {
-  const m = /^(.*-)([^-]+-\d+)$/.exec(id);
-  return m ? [m[1], h("span.nb", m[2])] : id;
-};
+const taskEl = id => { const m = /^(.*-)([^-]+-\d+)$/.exec(id); return m ? [m[1], h("span.nb", m[2])] : id; };
 const field = (label, ...k) => h("div.field", h("span", label), ...k);
-
 /* 기록 종류 전환 + (실제 요청이면) 새로고침 */
 function srcBar() {
   const live = SRC === "live";
   return h("div.srcbar",
     h("span.rl", LV("srcLabel")),
     seg("lf-src", LV("srcLabel"), [["live", LV("srcLive")], ["eval", LV("srcEval")]], v => SRC === v),
-    live && LIVE.state !== "loading" && h("button.btn.sm", { type: "button", id: "lf-reload" }, icon("loop"), LV("reload")),
+    live && LIVE.state !== "loading" &&
+      h("button.btn.sm", { type: "button", id: "lf-reload" }, icon("loop"), LV("reload")),
     live && LIVE.at && h("span.muted.small.num", LV("fetched", { t: utc(LIVE.at) })));
 }
-function bindSrc() {
+/* 머리말 · 기록 전환을 그리고 이벤트를 붙인 뒤, 전환 버튼을 누른 직후면 그 버튼에 초점 */
+function head(panel, ...body) {
+  const live = SRC === "live";
+  fill(panel, live ? h("div.phead", h("h2", LV("title")), h("p", LV("lead")),
+    h("span.src-chip", icon("server"), LV("srcChip"))) : phead(T("title"), T("lead")), srcBar(), ...body);
   onSeg($("#lf-src"), v => {
     if (v === SRC) return;
-    SRC = v;
-    focusSrc = true;
-    rerender("logs");
+    SRC = v; focusSrc = true; rerender("logs");
   });
   const rb = $("#lf-reload");
   if (rb) rb.addEventListener("click", () => {
-    focusSrc = true;
-    loadLive(true);
-    rerender("logs");
+    focusSrc = true; loadLive(true); rerender("logs");
   });
 }
-const liveHead = () =>
-  h("div.phead", h("h2", LV("title")), h("p", LV("lead")), h("span.src-chip", icon("server"), LV("srcChip")));
-const liveBar = () =>
-  h("div.runbar", h("span.rl", LV("barLabel")),
-    h("span.runpill", icon("server"), h("b", LV("rows", { n: fmtN(LIVE.rows.length) })), h("span.sub", LV("rowsSub"))),
-    h("p.runnote", icon("info"), h("span", LV("note"))));
 function afterSrc() {
   if (!focusSrc) return;
   focusSrc = false;
   const b = $(`#lf-src button[data-v="${SRC}"]`);
   if (b) b.focus();
 }
-
-register("logs", async panel => {
+export async function render(panel) {
   const live = SRC === "live";
   if (live && LIVE.state !== "ok" && LIVE.state !== "off") {
     const wantFocus = focusSrc;
-    fill(panel, liveHead(), srcBar(), h("p.loading", icon("loop"), LV("loading")));
-    bindSrc();
-    afterSrc();
-    await loadLive();
+    head(panel, h("p.loading", icon("loop"), LV("loading"))); afterSrc(); await loadLive();
     if (SRC !== "live") return; /* 읽는 동안 평가 기록으로 바꿨으면 그쪽 그리기에 맡긴다 */
     focusSrc = wantFocus; /* 다 읽은 뒤 다시 그릴 때도 전환 버튼에 초점 */
   }
   if (live && LIVE.state !== "ok") {
-    const body = LIVE.state === "off"
+    head(panel, LIVE.state === "off"
       ? h("section.card.live-off", h("h3", icon("info"), LV("offTitle")), h("p", LV("offBody")), foot(LV("offEval")))
-      : h("div.live-err", warnErr(LIVE.err, () => (focusSrc = true, rerender("logs"))), foot(LV("errHelp")));
-    fill(panel, liveHead(), srcBar(), body);
-    bindSrc();
+      : h("div.live-err", warnErr(LIVE.err, () => (focusSrc = true, rerender("logs"))), foot(LV("errHelp"))));
     afterSrc();
     return;
   }
@@ -109,10 +79,11 @@ register("logs", async panel => {
   };
   const contName = v => (v === "all" ? T("all") : t("parts.cont." + v));
   const contOpts = ["all", "skipped", "ran", "stop", "none"].map(v => [v, contName(v), { title: CONT_TIP[v] }]);
-  fill(panel,
-    live ? liveHead() : phead(T("title"), T("lead")),
-    srcBar(),
-    live ? liveBar() : runBar(),
+  head(panel,
+    live ? h("div.runbar", h("span.rl", LV("barLabel")),
+      h("span.runpill", icon("server"), h("b", LV("rows", { n: fmtN(LIVE.rows.length) })),
+        h("span.sub", LV("rowsSub"))),
+      h("p.runnote", icon("info"), h("span", LV("note")))) : runBar(),
     h("div.ltools", { role: "search", "aria-label": T("filters") },
       field(T("fMode"), seg("lf-mode", T("fMode"), [["all", T("all")], ["baseline", "baseline"], ["agent", "agent"]],
         v => L.mode === v)),
@@ -131,10 +102,7 @@ register("logs", async panel => {
         }))),
       h("aside.card.fitpane.ldetail", { id: "ldetail", "aria-label": T("detailLabel") })));
   const filtered = fn => v => {
-    fn(v);
-    L.limit = PAGE;
-    syncFilters();
-    drawLog();
+    fn(v); L.limit = PAGE; syncFilters(); drawLog();
   };
   onSeg($("#lf-mode"), filtered(v => (L.mode = v)));
   onSeg($("#lf-status"), filtered(v => {
@@ -147,16 +115,14 @@ register("logs", async panel => {
   const tbl = $("#ltable");
   tbl.addEventListener("click", e => {
     if (e.target.closest("#lmore")) {
-      L.limit += PAGE;
-      drawLog();
+      L.limit += PAGE; drawLog();
       return;
     }
     const sb = e.target.closest("[data-sort]");
     if (sb) {
       const k = sb.dataset.sort;
       if (L.sort.key === k) L.sort.dir *= -1;
-      else L.sort = { key: k, dir: k === "task" ? 1 : -1 };
-      drawLog();
+      else L.sort = { key: k, dir: k === "task" ? 1 : -1 }; drawLog();
       return;
     }
     const tr = e.target.closest("tbody tr");
@@ -168,26 +134,16 @@ register("logs", async panel => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const sib = e.key === "ArrowDown" ? tr.nextElementSibling : tr.previousElementSibling;
-      if (sib) {
-        pickRow(sib.dataset.id);
-        sib.focus();
-      }
-    } else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      pickRow(tr.dataset.id);
-    }
+      if (sib) { pickRow(sib.dataset.id); sib.focus(); }
+    } else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickRow(tr.dataset.id); }
   });
-  bindSrc();
-  drawLog();
-  afterSrc();
-});
-
+  drawLog(); afterSrc();
+}
 function syncFilters() {
   syncSeg($("#lf-mode"), v => L.mode === v);
   syncSeg($("#lf-status"), v => L.status.has(v));
   syncSeg($("#lf-cont"), v => L.cont === v);
 }
-
 function logRows() {
   const q = L.q.trim().toLowerCase(), f = (ADD_FILTERS.find(x => x[0] === L.add) || ADD_FILTERS[0])[2];
   const hit = r => !q || (r.question || "").toLowerCase().includes(q) || r.task_id.toLowerCase().includes(q) ||
@@ -200,14 +156,11 @@ function logRows() {
   const byOrder = (a, b) => order(a) - order(b);
   return rows.sort((a, b) => (val ? (val(a) - val(b)) * L.sort.dir || byOrder(a, b) : byOrder(a, b) * L.sort.dir));
 }
-
 /* 고른 행은 aria-current로 표시한다(일반 표라 aria-selected는 쓰지 않음) */
 const markRow = (tr, on) => {
   if (on) tr.setAttribute("aria-current", "true");
-  else tr.removeAttribute("aria-current");
-  tr.tabIndex = on ? 0 : -1;
+  else tr.removeAttribute("aria-current"); tr.tabIndex = on ? 0 : -1;
 };
-
 function logRow(r, maxT) {
   const bar = (tag, v) => h(tag, { css: { width: ((v / maxT) * 100).toFixed(1) + "%" } });
   /* 실제 요청은 과제 · 회차 대신 시각 · 전송 방식(transport) */
@@ -230,13 +183,10 @@ function logRow(r, maxT) {
   markRow(tr, r.id === L.sel);
   return tr;
 }
-
 function drawLog() {
   const rows = logRows();
   const cnt = s => rows.filter(r => r.status === s).length, cc = v => rows.filter(r => contKey(r) === v).length;
-  const legend = (cls, l) => h("span", h("span.dots3", h("i" + cls)), l);
-  const b = v => h("b", fmtN(v));
-  const all = rowsOf();
+  const legend = (cls, l) => h("span", h("span.dots3", h("i" + cls)), l), b = v => h("b", fmtN(v)), all = rowsOf();
   fill($("#lcount"), h("span", TX("count", { n: b(rows.length), total: fmtN(all.length) })),
     STATUSES.map(s => h("span", statusBadge(s), " ", fmtN(cnt(s)))),
     h("span", TX("contCount", {
@@ -266,40 +216,26 @@ function drawLog() {
   const more = rows.length > shown.length && h("p.lmore",
     h("button.btn", { type: "button", id: "lmore" }, icon("plus"), T("more", { k: fmtN(next) })),
     h("span.muted.small", T("shown", { a: fmtN(shown.length), b: fmtN(rows.length) })));
-  const empty = h("p.empty", all.length ? T("empty") : LV("none"));
-  fill($("#ltable"), rows.length ? table : empty, more);
-  drawLogDetail();
+  fill($("#ltable"), rows.length ? table : h("p.empty", all.length ? T("empty") : LV("none")), more); drawLogDetail();
   updateLayout();
-  if (!L.scrolled) {
-    L.scrolled = true;
-    requestAnimationFrame(() => revealRow(L.sel));
-  }
+  if (!L.scrolled) { L.scrolled = true; requestAnimationFrame(() => revealRow(L.sel)); }
 }
-
 function revealRow(id) {
   const box = $("#ltable"), tr = box && id && box.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
   if (!tr || box.scrollHeight <= box.clientHeight + 2) return;
   const head = (box.querySelector("thead") || {}).offsetHeight || 0;
-  const top = tr.offsetTop - head, bottom = tr.offsetTop + tr.offsetHeight;
-  if (top < box.scrollTop || bottom > box.scrollTop + box.clientHeight) {
-    box.scrollTop = Math.max(0, top - tr.offsetHeight);
-  }
+  const top = tr.offsetTop - head, bottom = tr.offsetTop + tr.offsetHeight, s0 = box.scrollTop;
+  if (top < s0 || bottom > s0 + box.clientHeight) box.scrollTop = Math.max(0, top - tr.offsetHeight);
 }
-
 function pickRow(id) {
   L.sel = id;
   $$("#ltable tbody tr").forEach(tr => markRow(tr, tr.dataset.id === id));
-  drawLogDetail();
-  revealRow(id);
+  drawLogDetail(); revealRow(id);
   if (!["xl", "l"].includes(document.body.dataset.w)) $("#ldetail").scrollIntoView({ block: "nearest" });
 }
-
 function drawLogDetail() {
   const host = $("#ldetail"), id = L.sel, r = REQ.get(id);
-  if (!r) {
-    fill(host, h("p.empty", T("pickRow")));
-    return;
-  }
+  if (!r) return fill(host, h("p.empty", T("pickRow")));
   const ftok = h("span", "…"), tbar = h("div", h("p.loading", T("traceLoading")));
   const noticeTime = r.background_ms > 0 && isNotice(r)
     ? [sec(r.background_ms), h("small", SEC())] : ["—", h("small", T("noNotice"))];
@@ -345,13 +281,11 @@ function drawLogDetail() {
     fill(tbar, warnErr(e, () => (retryTraces(), drawLogDetail())));
   });
 }
-
 function pairSection(r) {
   const p = pairOf(r), other = r.mode === "agent" ? "baseline" : "agent";
   const head = h4("pair", T("pairHead"), T("pairSub", { t: r.task_id, a: r.attempt }));
   if (!p) return h("section.pairsec", head, foot(T("pairNone", { m: other })));
-  const both = r.mode === "baseline" ? [r, p] : [p, r];
-  const sel = x => (x === r ? ".sel" : "");
+  const both = r.mode === "baseline" ? [r, p] : [p, r], sel = x => (x === r ? ".sel" : "");
   const tr = (lab, f) => h("tr", h("td", lab), both.map(x => h("td.num" + sel(x), f(x))));
   return h("section.pairsec", head,
     h("div.pct-wrap", h("table.cmpt",
@@ -363,18 +297,11 @@ function pairSection(r) {
       T("pickPair", { m: other })),
     h("span.muted.small", T("pairNote"))));
 }
-
 function pickPair(p) {
   if ($(`#ltable tr[data-id="${CSS.escape(p.id)}"]`)) return pickRow(p.id);
-  Object.assign(L, { mode: "all", cont: "all", add: "all", q: "", sel: p.id });
-  L.status.add(p.status);
-  $("#lf-add").value = "all";
-  $("#lf-q").value = "";
-  syncFilters();
-  drawLog();
-  revealRow(p.id);
+  Object.assign(L, { mode: "all", cont: "all", add: "all", q: "", sel: p.id }); L.status.add(p.status);
+  $("#lf-add").value = "all"; $("#lf-q").value = ""; syncFilters(); drawLog(); revealRow(p.id);
 }
-
 function answersMini(r) {
   const A = answersOf(r.id);
   if (!A || (!A.final.length && !A.first.length)) return null;

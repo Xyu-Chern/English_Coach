@@ -12,6 +12,10 @@ same literal test the corpus count uses, so every decision call reads the same e
 Whether a key phrase is one contiguous piece of an expression, and whether a wording covers
 it, are checked on normalize_for_match text: case, hyphens and dashes ("whack-a-mole"
 and "whack a mole", "trade-off" and "trade off") and outer punctuation do not matter.
+
+How many spans of a passage the model sees, and how long each is, is a SpanView: FULL_VIEW
+(the evaluated one) shows up to 12 whole sentence spans per passage; the app's fast first
+stage shows a compact view (fewer spans, each cut around the key phrase).
 """
 
 import re
@@ -21,6 +25,7 @@ from .contracts import CorpusSearchHit
 from .results import SourceCitation
 
 SPANS_PER_PASSAGE = 12  # Keeps each passage's share of the prompt small.
+MIN_SPAN_CHARS, MAX_SPAN_CHARS = 120, 800  # the shortest cut a SpanView allows; quote_spans' longest span
 SNIPPET_CHARS = 160  # A trace shows this much of each hit, enough to recognise it.
 # Approved shows a learner may restrict examples to (Podcast Index feed IDs in the corpus).
 SHOW_FEEDS = {"go_time": 218840, "js_party": 403674, "the_changelog": 542376}
@@ -146,6 +151,73 @@ def occurs_in(wording: str, span_text: str) -> bool:
 
 
 @dataclass(frozen=True)
+class SpanView:
+    """How many spans of each passage the model is shown, and at most how long each is.
+
+    FULL_VIEW, the evaluated one: up to 12 whole sentence spans per passage, those containing the
+    key phrase first, then text order. A compact view (any other) shows at most per_passage spans:
+    those containing the key phrase first, then those sharing most of its words, then text order;
+    with chars set, each is cut to at most that many characters around the key phrase (else its first
+    shared word, else the span's start), at spaces. A cut span is the span: its ref, the quote the
+    verifier checks and the citation are exactly the text shown."""
+
+    per_passage: int = SPANS_PER_PASSAGE
+    chars: int | None = None
+
+    def __post_init__(self):
+        if type(self.per_passage) is not int or not 1 <= self.per_passage <= SPANS_PER_PASSAGE:
+            raise ValueError(f"per_passage must be 1 to {SPANS_PER_PASSAGE}.")
+        if self.chars is not None and (type(self.chars) is not int
+                                       or not MIN_SPAN_CHARS <= self.chars <= MAX_SPAN_CHARS):
+            raise ValueError(f"chars must be {MIN_SPAN_CHARS} to {MAX_SPAN_CHARS}, or None.")
+
+    @property
+    def compact(self) -> bool:
+        return self != FULL_VIEW
+
+
+FULL_VIEW = SpanView()
+
+
+def phrase_at(text: str, phrase: str | None) -> tuple[int, int] | None:
+    """Where the phrase first occurs in text, ignoring case, quote style and spacing, on word boundaries."""
+    parts = (phrase or "").translate(_QUOTES).split()
+    if not parts:
+        return None
+    pattern = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in parts) + r"(?!\w)"
+    match = re.search(pattern, text.translate(_QUOTES), re.IGNORECASE)  # translate keeps every offset
+    return match.span() if match else None
+
+
+def cut_span(text: str, start: int, end: int, chars: int, key_phrase: str | None) -> tuple[int, int]:
+    """text[start:end] cut to at most chars characters around the key phrase (else its first word with
+    three letters or more, else the start), at spaces; a span that short already is kept whole."""
+    if end - start <= chars:
+        return start, end
+    piece = text[start:end]
+    focus = phrase_at(piece, key_phrase)
+    if focus is None:
+        focus = next((found for word in sorted(words(key_phrase or ""), key=len, reverse=True) if len(word) >= 3
+                      for found in [phrase_at(piece, word)] if found), None)
+    if focus is None:
+        low = 0
+    else:
+        low = max(0, min(focus[0] - (chars - (focus[1] - focus[0])) // 2, len(piece) - chars))
+    high = min(len(piece), low + chars)
+    if low > 0:  # start after a space, never inside the focus
+        space = piece.find(" ", low, focus[0] if focus else high)
+        low = space + 1 if space != -1 else low
+    if high < len(piece):  # end before a space, never inside the focus
+        space = piece.rfind(" ", focus[1] if focus else low, high + 1)
+        high = space if space > low else high
+    while low < high and piece[low].isspace():
+        low += 1
+    while high > low and piece[high - 1].isspace():
+        high -= 1
+    return start + low, start + high
+
+
+@dataclass(frozen=True)
 class Span:
     hit: CorpusSearchHit
     start: int
@@ -166,14 +238,21 @@ class SpanCatalog:
     def __init__(self):
         self.spans: dict[str, Span] = {}
 
-    def present(self, hits: list[CorpusSearchHit], prefix: str, key_phrase: str | None = None) -> list[dict]:
-        """Number the spans of each passage; spans containing the key phrase come first and say so."""
-        shown = []
+    def present(self, hits: list[CorpusSearchHit], prefix: str, key_phrase: str | None = None,
+                view: SpanView = FULL_VIEW) -> list[dict]:
+        """Number the spans of each passage as the view shows them; spans containing the key phrase come
+        first and say so."""
+        shown, key_words = [], words(key_phrase or "")
         for rank, hit in enumerate(hits, 1):
-            spans = [(start, end, contains_phrase(hit.text[start:end], key_phrase))
-                     for start, end in quote_spans(hit.text[:source_length(hit)])]
-            spans.sort(key=lambda span: not span[2])  # stable: text order within each group
-            for number, (start, end, has_key_phrase) in enumerate(spans[:SPANS_PER_PASSAGE], 1):
+            ranges = quote_spans(hit.text[:source_length(hit)])
+            if view.chars is not None:
+                ranges = [cut_span(hit.text, start, end, view.chars, key_phrase) for start, end in ranges]
+            spans = [(start, end, contains_phrase(hit.text[start:end], key_phrase)) for start, end in ranges]
+            if view.compact:  # stable: text order among spans that share as many words
+                spans.sort(key=lambda span: (not span[2], -len(key_words & words(hit.text[span[0]:span[1]]))))
+            else:
+                spans.sort(key=lambda span: not span[2])  # stable: text order within each group
+            for number, (start, end, has_key_phrase) in enumerate(spans[:view.per_passage], 1):
                 ref = f"{prefix}h{rank}s{number}"
                 self.spans[ref] = Span(hit, start, end)
                 shown.append({"ref": ref, "text": hit.text[start:end], "has_key_phrase": has_key_phrase,

@@ -203,6 +203,8 @@ class AdminDataTests(unittest.TestCase):
         warnings = " ".join(self.data["meta"]["warnings"])
         self.assertIn("tasks_sha256", warnings)
         self.assertIn("심사 기록이 없는 요청 1건", warnings)
+        self.assertEqual(QUESTION, self.by_key["t-one/agent/1"]["question"])  # verbatim
+        self.assertEqual("检索失败的问题", self.by_key["t-error/agent/1"]["question"])
 
     def test_first_stage_and_continuation_numbers(self):
         b, a = self.by_key["t-one/baseline/1"], self.by_key["t-one/agent/1"]
@@ -356,10 +358,6 @@ class AdminDataTests(unittest.TestCase):
                                                                data["mode"]["env_var"]))
         self.assertEqual({"baseline", "agent"}, set(data["mode"]["modes"]))
 
-    def test_question_is_kept_verbatim(self):
-        self.assertEqual(QUESTION, self.by_key["t-one/agent/1"]["question"])
-        self.assertEqual("检索失败的问题", self.by_key["t-error/agent/1"]["question"])
-
     def test_write_inline_or_split_by_size(self):
         out = self.root / "out"
         sizes = write(self.data, out)
@@ -382,6 +380,59 @@ class AdminDataTests(unittest.TestCase):
             write(self.data, self.root / "never", max_bytes=inline - 1, split="never")
         with self.assertRaises(ValueError):
             write(self.data, self.root / "tiny", max_bytes=100)
+
+    def test_a_stage_without_its_own_branch_keeps_only_listed_details(self):
+        later = {"code": "model_budget_exhausted", "error_detail": "provider said: quota", "url": "https://x.invalid/",
+                 "started_ms": 5.0, "shared": True}
+        self.assertEqual({"code": "model_budget_exhausted"},
+                         admin_data.detail_of("budget_exhausted", later, rich=True, locked_slots=None))
+        self.assertEqual({"verified": 3}, admin_data.detail_of("continuation_skipped", {"verified": 3, "note": "n"},
+                                                               rich=True, locked_slots=None))
+        self.assertEqual({"error_code": "boom"},  # an unknown stage: its error code only
+                         admin_data.detail_of("future_stage", {"error_code": "boom", "url": "https://x.invalid/",
+                                                               "token": "t"}, rich=True, locked_slots=None))
+
+    def test_write_stops_on_a_secret_or_a_local_path_and_writes_nothing(self):
+        # built here so that this file holds no secret-like literal for a scanner to flag
+        secrets = {"an Anthropic key (sk-ant-)": "sk-" + "ant-api03-" + "x" * 24,
+                   "an API key (sk-)": "sk-" + "proj-" + "A1b2" * 6,
+                   "a Google API key (AIza)": "AI" + "za" + "S" * 33,
+                   "a GitHub token (ghp_)": "gh" + "p_" + "a" * 36,
+                   "a PEM block (-----BEGIN)": "-----" + "BEGIN OPENSSH PRIVATE KEY-----",
+                   "a database URL with a password": "postgresql://coach:" + "pw" + "@db.example/coach",
+                   "a local home path": "/" + "Users/someone/Projects/x.json"}
+        secrets["a local home path (Windows)"] = "C:" + "\\Users\\someone\\x.json"
+        secrets["a local home path (Linux)"] = "see /" + "home/someone/run"
+        for i, (name, value) in enumerate(secrets.items()):
+            with self.subTest(name):
+                payload = json.loads(json.dumps(self.data))
+                payload["requests"][0]["question"] = "회의에서 " + value
+                out = self.root / f"leak-{i}"
+                with self.assertRaises(ValueError) as caught:
+                    write(payload, out)
+                self.assertNotIn(value, str(caught.exception))
+                self.assertIn(name.split(" (")[0] if "path" in name else name, str(caught.exception))
+                self.assertFalse(out.exists())
+        # lookalikes in ordinary text pass
+        payload = json.loads(json.dumps(self.data))
+        payload["requests"][0]["question"] = ("a risk-free plan, ask-me-anything, sk-learn, postgresql://coach@db/x, "
+                                              "https://example.com/home/page/ and https://example.com/Users/a/")
+        self.assertEqual({"data.json"}, set(write(payload, self.root / "plain")))
+
+    def test_the_command_line_fails_on_a_leak(self):
+        leak = "postgresql://coach:" + "pw" + "@db.example/coach"
+        trace = [*first_stage(1), span("search_1_1", 400, slot=1, query="see " + leak, key_phrase="E1"),
+                 span("assemble", 0, expressions=3, with_example=1)]
+        run, tasks = write_run(self.root, "leaky", {"baseline": [row("t-one", "baseline", trace, elapsed=5000,
+                                                                     expressions=[item("E0", "quote 0")])]}, [])
+        out, stderr = self.root / "leaky-out", io.StringIO()
+        with redirect_stderr(stderr):
+            code = admin_data.main(["--results", str(self.root), "--run", "leaky", "--tasks", str(tasks),
+                                    "--out", str(out)])
+        self.assertEqual(2, code)
+        self.assertIn("a database URL with a password", stderr.getvalue())
+        self.assertNotIn(leak, stderr.getvalue())
+        self.assertFalse((out / "data.json").exists())
 
     def test_command_line(self):
         out = self.root / "cli"

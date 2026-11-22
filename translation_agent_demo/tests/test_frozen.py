@@ -9,13 +9,18 @@ AGENT_LOCKED_PROMPT (2026-11-21, the verified-slot lock D1) is AGENT_PROMPT with
 added after the guard paragraph: locked slots are final, and actions naming them are noops.
 2026-11-22: the paragraph now matches D1 exactly. Only a repick or replace naming a locked slot is
 a noop (named "locked"); a search naming one still runs and spends a search.
+
+APP_PROMPTS (2026-11-22, PR7) are the app's fast first stage only (CANDIDATES_COMPACT_PROMPT,
+SELECT_COMPACT_PROMPT): never in an evaluation run, pinned so a change is still deliberate. They use the
+same reply schemas as the evaluation (CandidateSet, Selection), so REPLIES is unchanged.
 """
 
 import hashlib
 import json
 import unittest
 
-from translation_agent_demo.agents.prompts import (AGENT_LOCKED_PROMPT, AGENT_PROMPT, CANDIDATES_PROMPT, REVISE_PROMPT,
+from translation_agent_demo.agents.prompts import (AGENT_LOCKED_PROMPT, AGENT_PROMPT, CANDIDATES_COMPACT_PROMPT,
+                                                   CANDIDATES_PROMPT, REVISE_PROMPT, SELECT_COMPACT_PROMPT,
                                                    SELECT_PROMPT)
 from translation_agent_demo.agents.schemas.agent import AgentDecision, FinalPick
 from translation_agent_demo.agents.schemas.baseline import Revision
@@ -29,6 +34,11 @@ PROMPTS = {
     "AGENT_PROMPT": (AGENT_PROMPT, "951e2e5fda16636f0db78965b6c44111baf851f8fe8d55edfe065ddb69e89f98"),
     "AGENT_LOCKED_PROMPT": (AGENT_LOCKED_PROMPT,
                             "69fb0ffbdfd357d191c159e11be573eeb5ea9845e3847eac2c25e20f9eab16c0"),
+}
+APP_PROMPTS = {
+    "CANDIDATES_COMPACT_PROMPT": (CANDIDATES_COMPACT_PROMPT,
+                                  "ee04164b9c91f347060d5cfe44de02d918623c449f3c12dca0ddfc1269491de8"),
+    "SELECT_COMPACT_PROMPT": (SELECT_COMPACT_PROMPT, "c8242e34b423dfd1745d44a1880687abbf6e63a25941ab513059ef2e06581b13"),
 }
 REPLIES = {
     CandidateSet: "ac8d55f4bcb2a37b94138e1c3f4c9e039f9b51f3125efa0a4c5503686a665ec2",
@@ -46,6 +56,11 @@ def sha(text: str) -> str:
 class FrozenTests(unittest.TestCase):
     def test_prompts_are_the_ones_the_runs_used(self):
         for name, (text, expected) in PROMPTS.items():
+            with self.subTest(prompt=name):
+                self.assertEqual(sha(text), expected)
+
+    def test_the_app_s_compact_prompts_change_only_deliberately(self):
+        for name, (text, expected) in APP_PROMPTS.items():
             with self.subTest(prompt=name):
                 self.assertEqual(sha(text), expected)
 

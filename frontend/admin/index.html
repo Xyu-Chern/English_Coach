@@ -15,10 +15,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.3.0/index.css"
   integrity="sha384-NST9F93++1eck4FnDE0yqyWiwNNfBoWDI9qHmFymatO15xmb9YIy6A3BP1wUJs2A" crossorigin="anonymous">
 <link rel="stylesheet" href="admin.css">
-<link rel="stylesheet" href="graph.css">
-<link rel="stylesheet" href="i18n.css">
-<!-- 모듈 진입점(같은 폴더의 i18n · ui · data · parts · shell · tab-*.js를 import). data.json은 admin.js가 상대 경로로 읽는다.
-     아래 고정 문구는 기본 언어(ko)이고, data-i18n · data-i18n-aria 키로 shell.js가 지금 언어로 바꾼다. -->
+<!-- 진입점 admin.js(i18n.js · tab-*.js를 import, data.json은 상대 경로). 아래 고정 문구(ko)는 data-i18n 키로 바뀐다. -->
 <script type="module" src="admin.js"></script>
 </head>
 <body>
@@ -26,17 +23,13 @@
 <header class="top">
   <div class="deco" aria-hidden="true" data-allow-overlap>
     <svg viewBox="0 0 360 120" preserveAspectRatio="xMaxYMid slice" fill="none" stroke="#9fb6cf" stroke-width="1">
-      <g opacity=".45">
-        <path d="M0 20H360M0 40H360M0 60H360M0 80H360M0 100H360"/>
-        <path d="M40 0V120M80 0V120M120 0V120M160 0V120M200 0V120M240 0V120M280 0V120M320 0V120"/>
-      </g>
-      <g stroke="#7f9bba" stroke-width="1.3">
-        <rect x="292" y="14" width="34" height="56" rx="17"/>
+      <g opacity=".45"><path d="M0 20H360M0 40H360M0 60H360M0 80H360M0 100H360"/>
+        <path d="M40 0V120M80 0V120M120 0V120M160 0V120M200 0V120M240 0V120M280 0V120M320 0V120"/></g>
+      <g stroke="#7f9bba" stroke-width="1.3"><rect x="292" y="14" width="34" height="56" rx="17"/>
         <path d="M296 28h26M296 36h26M296 44h26M296 52h26M302 18v48M309 15v54M316 18v48"/>
         <path d="M284 50a25 25 0 0 0 50 0"/><path d="M309 75v22M292 100h34"/>
         <circle cx="309" cy="42" r="40" stroke-dasharray="3 5" opacity=".7"/>
-        <path d="M250 96l20-20M346 10l-14 14" opacity=".7"/>
-      </g>
+        <path d="M250 96l20-20M346 10l-14 14" opacity=".7"/></g>
     </svg>
   </div>
   <div class="top-inner">
@@ -59,7 +52,8 @@
 </header>
 <main id="main">
   <p class="admin-bar" id="adminBar"></p>
-  <div class="state" id="state" role="status"><p class="loading" data-i18n="app.loading">데이터(data.json)를 불러오는 중이에요…</p></div>
+  <div class="state" id="state" role="status">
+    <p class="loading" data-i18n="app.loading">데이터(data.json)를 불러오는 중이에요…</p></div>
   <section role="tabpanel" id="panel-flags" aria-labelledby="tab-flags" tabindex="0" hidden></section>
   <section role="tabpanel" id="panel-logs" aria-labelledby="tab-logs" tabindex="0" hidden></section>
   <section role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" tabindex="0" hidden></section>
