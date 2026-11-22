@@ -70,9 +70,52 @@ The web and Android client asks for NDJSON (`Accept: application/x-ndjson, appli
 - **Accessibility and layout:** one polite live region speaks only when an answer arrives: the first examples and the end of the search. The notice sits outside the redrawn page, and a redraw keeps the cursor in the question box. The tabs are visible on the chat page too, so the **Podcast** tab's badge can be seen and tapped at once; the notice and the slot under the answer also link to it. With large text or a short screen, the question box no longer sticks to the bottom.
 - **Checks:** server tests cover the stream; the screen states were checked in a headless browser with tools kept outside the repository. `ask()` (the 300 s abort, the running limit, the JSON and relay fallbacks) has no automated test.
 
+## Admin page (/admin)
+
+The admin page is read-only and open (D4): anyone with the address can see it, and the page says so. It ships in the same deployment as the app. Its data is one evaluation run's record, `data.json` built by `frontend/admin_data.py`. It holds no learner requests, because the deployment stores none (D5). Changing the mode still means changing `COACH_SYSTEM` and redeploying.
+
+| Where | Page | Data |
+|---|---|---|
+| Local server | `frontend/admin/` at `/admin/` | `/admin/data.json`, plus `data-traces.json` when split, from the same folder |
+| Local preview | `COACH_ADMIN_DIR=<page folder>` | `COACH_ADMIN_DATA=<folder with data.json>` |
+| Vercel | `public/admin/`, static files | built into `public/admin/` by the packager |
+
+`frontend/admin/` holds the chosen design (B, Phrase Room brand): `index.html`, ES modules (`admin.js` loads the data) and CSS. It has four tabs:
+
+| Tab | What it shows |
+|---|---|
+| **Mode comparison** | `baseline` and `agent` from the same run, side by side on the same measures, with the mode the data was built for |
+| **Request log** | Every run request with status, examples, timings, tokens, follow-up and lock marks. No user column (D3) |
+| **Metrics** | p50 · p95 · p99 of time and tokens. Final time compares only the tasks where both modes ran a follow-up |
+| **Run graph** | One request as a route map of the components, a swimlane timeline and a step detail panel |
+
+- **Languages:** a switch in the header shows the page in Korean, Chinese or English. `?lang=ko|zh|en` picks one for a link and is not saved; a choice in the header is saved in the browser. Korean is the default.
+- **Rules for any design:** read `data.json` by relative URL, and show only a version message when `meta.schema_version` is not 1. The page writes text with `textContent` and DOM calls only, and keeps its Content-Security-Policy. Web fonts load from jsdelivr with SRI, and system fonts are used when they are blocked.
+- **Paths:** a page reads `data.json` relative to itself, so `/admin` redirects to `/admin/` (local server and `vercel.json`). A folder named by a variable must exist, and a data folder must hold `data.json`. Otherwise the server does not start.
+- **Packaging:** `python -m frontend.vercel.package --admin-run <run> --admin-results <results root>` builds the data in the deployment's mode: `--coach-system`, else `COACH_SYSTEM`, else `agent`. `COACH_ADMIN_RUN` and `COACH_ADMIN_RESULTS` work too. Without a run, the packager ships `frontend/admin/data.json` if it exists, or no data, and prints which. It always removes an older package's data first. The packaging machine therefore needs the run folder or a committed `frontend/admin/data.json` (judgment question 2).
+- **Size:** the admin files are static and add nothing to the function. The data of the submission run adds 2.9 MB to `public/` (0.26 MB gzip).
+- **Preview package:** `--skip-apk` and `--skip-search-data` build without the Android SDK, the corpus or the encoder. They need an `--out` other than the deploy folder, and such a package cannot answer questions.
+- **Known gaps:** the corpus export still uses `sudo -u postgres psql` (WSL). Its schema `evaluation_zh_local_v1` is not in the macOS Docker database, so build a deployable package in WSL for now. Server tests check that the page is served and follows the rules above; the page's JavaScript has no automated test and was checked in a browser.
+
+### Check with real data on local ports
+
+Build the data once from a run, then start one server per design or mode on its own port. Run each line from the repository root, with `uv run --python 3.11 --with-requirements frontend/requirements.txt` placed right before `python`. For the re-evaluation, `<run>` is its folder under `evaluation/results`, such as `d6-locked-<date>`.
+
+```sh
+python -m frontend.admin_data --results evaluation/results --run <run> --tasks evaluation/data/tasks.jsonl --out <data folder>
+COACH_ADMIN_DATA=<data folder> python -m frontend.server --port 8788
+COACH_ADMIN_DATA=<data folder> COACH_ADMIN_DIR=<design folder> python -m frontend.server --port 8789
+COACH_SYSTEM=baseline COACH_ADMIN_DATA=<data folder> python -m frontend.server --port 8790
+```
+
+- Each port serves the learner app at `/` and the admin page at `/admin/`. Port 8788 shows `frontend/admin`, 8789 another design folder, and 8790 the learner app on the baseline.
+- Opening `/admin/` asks the coach nothing, so it needs no database or model settings. A question in the learner app is a paid model call and needs the settings from **Run and install**.
+- The page shows the mode the data was built with: `--coach-system`, else `COACH_SYSTEM`, else `agent`.
+
 ## Project Owner Judgment Questions
 
 1. While a background search runs, a new coach question waits, because the server answers one request per process and would refuse it as busy. Keep this default, or let the question go and accept an occasional busy reply?
+2. Should `frontend/admin/data.json` from the locked re-evaluation run be committed? It is about 3 MB and holds the evaluation questions verbatim. Committing it lets any machine package the same `/admin`. Otherwise it is built at packaging time from the git-ignored results folder, which exists on one machine only. Recommended: commit that one file.
 
 # 中文
 
@@ -146,9 +189,52 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - **无障碍与布局：** 只有一个礼貌型实时区域，只在回答到达时播报：先到的例句和查找结束。提示条位于会重绘的页面之外，重绘时输入框保留光标。聊天页也显示标签栏，**播客** 页的徽标一眼可见，可以直接点开；提示条和回答下方的空位也链接到那里。字号很大或屏幕很矮时，输入框不再固定在底部。
 - **检查：** 服务端测试覆盖流式传输；各个画面状态在无头浏览器中检查过，所用工具不在仓库里。`ask()`（300 秒中止、同时查找上限、JSON 和中继回退）没有自动化测试。
 
+## 管理页（/admin）
+
+管理页只读且不设保护（D4）：知道网址的人都能查看，页面上也会说明这一点。它和应用放在同一个部署里。数据是一次评估运行的记录，即 `frontend/admin_data.py` 生成的 `data.json`。其中没有学习者请求，因为部署不保存任何请求（D5）。切换模式仍需修改 `COACH_SYSTEM` 并重新部署。
+
+| 位置 | 页面 | 数据 |
+|---|---|---|
+| 本地服务 | `frontend/admin/`，地址 `/admin/` | 同一文件夹的 `/admin/data.json`，拆分时还有 `data-traces.json` |
+| 本地预览 | `COACH_ADMIN_DIR=<页面文件夹>` | `COACH_ADMIN_DATA=<含 data.json 的文件夹>` |
+| Vercel | `public/admin/`，静态文件 | 打包脚本生成到 `public/admin/` |
+
+`frontend/admin/` 是选定的设计稿（B，Phrase Room 品牌）：`index.html`、ES 模块（由 `admin.js` 读取数据）和 CSS。共有四个标签页：
+
+| 标签页 | 显示内容 |
+|---|---|
+| **模式对比** | 同一次运行中的 `baseline` 和 `agent`，按相同指标并排比较，并标出数据生成时的模式 |
+| **请求日志** | 运行中的每个请求：状态、例句、耗时、token、后续阶段和锁定标记。没有用户列（D3） |
+| **指标** | 耗时和 token 的 p50 · p95 · p99。最终耗时只比较两种模式都运行了后续阶段的任务 |
+| **执行图** | 单个请求的组件路线图、泳道时间轴和步骤详情面板 |
+
+- **语言：** 页头的切换按钮可将页面显示为韩文、中文或英文。`?lang=ko|zh|en` 只对该链接生效，不会保存；在页头选择的语言会保存在浏览器中。默认是韩文。
+- **所有设计稿的规则：** 按相对路径读取 `data.json`；`meta.schema_version` 不是 1 时，只显示版本不符的提示。页面只用 `textContent` 和 DOM 调用写入文字，并保留内容安全策略（CSP）。网页字体通过带 SRI 的 jsdelivr 加载，被拦截时使用系统字体。
+- **路径：** 页面按相对路径读取 `data.json`，所以 `/admin` 会重定向到 `/admin/`（本地服务和 `vercel.json` 都如此）。变量指定的文件夹必须存在，数据文件夹必须包含 `data.json`，否则服务不会启动。
+- **打包：** `python -m frontend.vercel.package --admin-run <run> --admin-results <结果根目录>` 按部署模式生成数据：先用 `--coach-system`，其次 `COACH_SYSTEM`，否则为 `agent`。也可以使用 `COACH_ADMIN_RUN` 和 `COACH_ADMIN_RESULTS`。不指定运行时，若存在 `frontend/admin/data.json` 就打包它，否则不带数据，并打印说明。打包前总会先删除旧包里的数据。因此打包的机器需要有该运行文件夹，或已提交的 `frontend/admin/data.json`（判断题 2）。
+- **大小：** 管理页文件是静态文件，函数大小不变。提交时那次运行的数据使 `public/` 增加 2.9 MB（gzip 后 0.26 MB）。
+- **预览包：** `--skip-apk` 和 `--skip-search-data` 可在没有 Android SDK、语料或编码器时打包。必须用 `--out` 指定部署文件夹以外的位置，这种包不能回答问题。
+- **已知差距：** 语料导出仍使用 `sudo -u postgres psql`（WSL）。它读取的 `evaluation_zh_local_v1` schema 不在 macOS 的 Docker 数据库中，目前仍需在 WSL 中生成可部署的包。服务端测试检查页面能被提供并遵守上述规则；页面的 JavaScript 没有自动化测试，只在浏览器中检查过。
+
+### 在本地端口用真实数据检查
+
+先从一次运行生成一次数据，再为每个设计稿或模式在各自端口启动一个服务。每一行都在仓库根目录运行，并在 `python` 前面加上 `uv run --python 3.11 --with-requirements frontend/requirements.txt`。检查重新评估时，`<run>` 是它在 `evaluation/results` 下的文件夹，例如 `d6-locked-<日期>`。
+
+```sh
+python -m frontend.admin_data --results evaluation/results --run <run> --tasks evaluation/data/tasks.jsonl --out <数据文件夹>
+COACH_ADMIN_DATA=<数据文件夹> python -m frontend.server --port 8788
+COACH_ADMIN_DATA=<数据文件夹> COACH_ADMIN_DIR=<设计稿文件夹> python -m frontend.server --port 8789
+COACH_SYSTEM=baseline COACH_ADMIN_DATA=<数据文件夹> python -m frontend.server --port 8790
+```
+
+- 每个端口都在 `/` 提供学习端，在 `/admin/` 提供管理页。8788 显示 `frontend/admin`，8789 显示另一个设计稿文件夹，8790 是使用 baseline 的学习端。
+- 打开 `/admin/` 不会向教练提问，所以不需要数据库或模型配置。在学习端提问会产生付费模型调用，并需要「启动与安装」中的配置。
+- 页面显示生成数据时的模式：先用 `--coach-system`，其次 `COACH_SYSTEM`，否则为 `agent`。
+
 ## 项目负责人判断题
 
 1. 后台查找进行时，新的教练提问会等待，因为服务端每个进程只处理一个请求，否则会以忙碌拒绝。保留这一默认做法，还是允许发送并接受偶尔的忙碌回复？
+2. 是否提交由加锁重新评估运行生成的 `frontend/admin/data.json`？它约 3 MB，原样包含评估问题。提交后，任何机器都能打包出相同的 `/admin`；不提交时，只能在打包时从被 git 忽略的结果文件夹生成，而这个文件夹只在一台机器上。建议：只提交这一个文件。
 
 # 한국어
 
@@ -222,6 +308,49 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - **접근성과 배치:** polite 라이브 영역 하나가 답이 도착할 때만 읽어 준다(처음 예문, 검색 끝). 공지는 다시 그려지는 화면 밖에 있고, 다시 그릴 때 입력창의 커서를 유지한다. 채팅 화면에도 탭을 보여 주므로 **팟캐스트** 탭의 배지를 바로 보고 누를 수 있다. 공지와 답 아래 빈 자리도 그 탭으로 연결된다. 글자가 아주 크거나 화면이 낮으면 입력창을 아래에 고정하지 않는다.
 - **확인:** 서버 테스트가 스트리밍을 다룬다. 화면 상태는 저장소 밖 도구로 헤드리스 브라우저에서 확인했다. `ask()`(300초 중단, 동시 검색 제한, JSON·릴레이 대체 흐름)에는 자동 테스트가 없다.
 
+## 어드민 화면(/admin)
+
+어드민 화면은 읽기 전용이며 보호가 없다(D4). 주소를 아는 사람은 누구나 볼 수 있고, 화면에도 그렇게 적혀 있다. 앱과 같은 배포에 들어간다. 데이터는 평가 실행 기록 하나로, `frontend/admin_data.py`가 만든 `data.json`이다. 배포는 요청을 저장하지 않으므로 학습자 요청은 들어 있지 않다(D5). 모드를 바꾸려면 지금처럼 `COACH_SYSTEM`을 바꾸고 다시 배포한다.
+
+| 위치 | 화면 | 데이터 |
+|---|---|---|
+| 로컬 서버 | `frontend/admin/`, 주소 `/admin/` | 같은 폴더의 `/admin/data.json`, 분리된 경우 `data-traces.json`도 |
+| 로컬 미리보기 | `COACH_ADMIN_DIR=<화면 폴더>` | `COACH_ADMIN_DATA=<data.json이 있는 폴더>` |
+| Vercel | `public/admin/`, 정적 파일 | 패키징 스크립트가 `public/admin/`에 만든다 |
+
+`frontend/admin/`은 고른 시안(B, Phrase Room 브랜드)이다. `index.html`, ES 모듈(`admin.js`가 데이터를 읽는다), CSS로 이루어지며 탭은 네 개다.
+
+| 탭 | 보여 주는 것 |
+|---|---|
+| **모드 비교** | 같은 실행의 `baseline`과 `agent`를 같은 기준으로 나란히 비교하고, 데이터를 만든 모드를 표시한다 |
+| **요청 로그** | 실행의 모든 요청: 상태, 예문, 시간, 토큰, 후속 단계, 잠금 표시. 사용자 열은 없다(D3) |
+| **지표** | 시간과 토큰의 p50 · p95 · p99. 최종 시간은 두 모드가 모두 후속 단계를 실행한 과제끼리만 비교한다 |
+| **실행 그래프** | 요청 한 건을 구성요소 노선도, 스윔레인 타임라인, 단계 상세 패널로 보여 준다 |
+
+- **언어:** 머리말의 전환 버튼으로 한국어, 중국어, 영어 중 하나로 볼 수 있다. `?lang=ko|zh|en`은 그 링크에만 적용되고 저장되지 않는다. 머리말에서 고른 언어는 브라우저에 저장된다. 기본은 한국어다.
+- **모든 시안의 규칙:** `data.json`을 상대 경로로 읽고, `meta.schema_version`이 1이 아니면 버전이 맞지 않는다는 안내만 보여 준다. 글자는 `textContent`와 DOM 호출로만 쓰고, 콘텐츠 보안 정책(CSP)을 유지한다. 웹폰트는 SRI가 붙은 jsdelivr에서 읽고, 막히면 시스템 글꼴을 쓴다.
+- **경로:** 화면은 `data.json`을 상대 경로로 읽는다. 그래서 `/admin`은 `/admin/`으로 이동한다(로컬 서버와 `vercel.json` 모두). 변수로 지정한 폴더는 있어야 하고, 데이터 폴더에는 `data.json`이 있어야 한다. 아니면 서버가 시작하지 않는다.
+- **패키징:** `python -m frontend.vercel.package --admin-run <run> --admin-results <결과 루트>`는 배포 모드로 데이터를 만든다. 모드는 `--coach-system`, 없으면 `COACH_SYSTEM`, 그것도 없으면 `agent`다. `COACH_ADMIN_RUN`, `COACH_ADMIN_RESULTS`도 쓸 수 있다. 실행을 지정하지 않으면 `frontend/admin/data.json`이 있을 때 그것을 넣고, 없으면 데이터 없이 만들며 어느 쪽인지 출력한다. 이전 패키지의 데이터는 항상 먼저 지운다. 그래서 패키징하는 기기에는 그 실행 폴더나 커밋된 `frontend/admin/data.json`이 있어야 한다(판단 질문 2).
+- **크기:** 어드민 파일은 정적 파일이라 함수 크기는 그대로다. 제출 실행의 데이터는 `public/`에 2.9 MB(gzip 0.26 MB)를 더한다.
+- **미리보기 패키지:** `--skip-apk`와 `--skip-search-data`는 Android SDK, 코퍼스, 인코더 없이 패키지를 만든다. 배포 폴더가 아닌 `--out`이 필요하고, 이 패키지는 질문에 답하지 못한다.
+- **알려진 차이:** 코퍼스 내보내기는 아직 `sudo -u postgres psql`(WSL)을 쓴다. 읽는 스키마 `evaluation_zh_local_v1`은 macOS의 Docker 데이터베이스에 없으므로, 배포용 패키지는 당분간 WSL에서 만든다. 서버 테스트는 화면이 제공되고 위 규칙을 지키는지 확인한다. 화면의 JavaScript에는 자동 테스트가 없고 브라우저에서 확인했다.
+
+### 로컬 포트에서 실제 데이터로 확인하기
+
+실행 기록 하나로 데이터를 한 번 만든 뒤, 시안이나 모드마다 다른 포트로 서버를 하나씩 띄운다. 각 줄은 저장소 루트에서 `python` 바로 앞에 `uv run --python 3.11 --with-requirements frontend/requirements.txt`를 넣어 실행한다. 재평가 결과를 볼 때 `<run>`은 `evaluation/results` 아래의 그 실행 폴더다(예: `d6-locked-<날짜>`).
+
+```sh
+python -m frontend.admin_data --results evaluation/results --run <run> --tasks evaluation/data/tasks.jsonl --out <데이터 폴더>
+COACH_ADMIN_DATA=<데이터 폴더> python -m frontend.server --port 8788
+COACH_ADMIN_DATA=<데이터 폴더> COACH_ADMIN_DIR=<시안 폴더> python -m frontend.server --port 8789
+COACH_SYSTEM=baseline COACH_ADMIN_DATA=<데이터 폴더> python -m frontend.server --port 8790
+```
+
+- 포트마다 `/`에 학습자 앱, `/admin/`에 어드민 화면이 있다. 8788은 `frontend/admin`, 8789는 다른 시안 폴더, 8790은 baseline으로 답하는 학습자 앱이다.
+- `/admin/`을 열어도 코치에게 질문하지 않으므로 데이터베이스나 모델 설정이 필요 없다. 학습자 앱에서 질문하면 유료 모델 호출이 생기고, '실행 및 설치'의 설정이 필요하다.
+- 화면은 데이터를 만들 때의 모드를 보여 준다. 모드는 `--coach-system`, 없으면 `COACH_SYSTEM`, 그것도 없으면 `agent`다.
+
 ## 프로젝트 책임자 판단 질문
 
 1. 백그라운드 검색 중에는 새 코치 질문이 기다린다. 서버가 프로세스당 요청 하나만 처리해서, 보내면 busy로 거절되기 때문이다. 이 기본값을 유지할까요, 아니면 질문을 보내게 하고 가끔 나오는 busy 응답을 감수할까요?
+2. 잠금 재평가 실행으로 만든 `frontend/admin/data.json`을 커밋할까요? 약 3 MB이고 평가 질문 원문이 그대로 들어 있습니다. 커밋하면 어느 기기에서나 같은 `/admin`을 패키징할 수 있습니다. 커밋하지 않으면 패키징할 때 git이 무시하는 결과 폴더에서 만들어야 하는데, 그 폴더는 한 기기에만 있습니다. 추천: 그 파일 하나만 커밋한다.

@@ -12,9 +12,9 @@ from translation_agent_demo.agents import ExpressionItem
 
 class CoachApiTests(unittest.TestCase):
     def setUp(self):
-        # make_app reads the mode variables when it starts; a shell's settings must not reach it
+        # make_app reads the mode and admin variables when it starts; a shell's settings must not reach it
         env = patch.dict(os.environ, {"COACH_PAIR_CODE": "", "COACH_WEB_ORIGIN": "", "COACH_SYSTEM": "",
-                                      "COACH_CONTINUATION": ""})
+                                      "COACH_CONTINUATION": "", "COACH_ADMIN_DIR": "", "COACH_ADMIN_DATA": ""})
         env.start()
         self.addCleanup(env.stop)
         self.answer = Mock(return_value=SimpleNamespace(

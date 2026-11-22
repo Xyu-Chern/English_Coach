@@ -25,7 +25,7 @@ STREAM = {"Accept": NDJSON}
 LEARNER_KEYS = {"expression", "key_phrase", "note", "citation"}
 # The variables make_app reads when it starts, cleared so a shell's settings cannot change a test.
 CLEAN_ENV = {"COACH_PAIR_CODE": "", "COACH_WEB_ORIGIN": "", "COACH_SYSTEM": "", "COACH_CONTINUATION": "",
-             "COACH_DEADLINE_SECONDS": ""}
+             "COACH_ADMIN_DIR": "", "COACH_ADMIN_DATA": "", "COACH_DEADLINE_SECONDS": ""}
 
 
 class Gate:
@@ -256,7 +256,7 @@ class StreamApiTests(unittest.TestCase):
         self.assertNotIn("SECRET-CONTEXT", self.logs[0])
         self.assertNotIn("Shall we pause here", self.logs[0])  # no answer text
         self.assertLess(len(self.logs[0].encode()), 1024)
-        # added_final: 0 without a first answer; verified_final: what the learner ends with
+        # added_final as in the admin data: 0 without a first answer; verified_final what the learner ends with
         for name, status, continuation, first, added, final in (("three_verified", "ok", "skipped", 3, 0, 3),
                                                                 ("declined", "declined", "none", None, 0, 0),
                                                                 ("none_verified_filled", "ok", "ran", 0, 0, 1)):

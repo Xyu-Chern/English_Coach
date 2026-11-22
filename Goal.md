@@ -177,7 +177,7 @@ Done. The web study interface and installed Android app were tested with questio
 
 The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
 
-### Staged answers and verified-slot lock (D1–D3, D5, D6)
+### Staged answers, verified-slot lock and admin page (D1–D6)
 
 Scope, contracts and known gaps are in `design.md` (Learner clients). G6 made the only paid calls ($3.63); every other check used fake models.
 
@@ -186,8 +186,11 @@ Scope, contracts and known gaps are in `design.md` (Learner clients). G6 made th
 | G1 | Lock the first stage's verified slots in the agent; skip the continuation when every slot is verified | — | Done | Coach and evaluation unit tests pass |
 | G2 | Server: `first`/`final` NDJSON on request, JSON by default, mode variables, 280 s deadline, one log line per request | G1 | Done | Server tests pass, including a real uvicorn stream and a client that leaves |
 | G3 | Learner app: first results, notice, Podcast tab, return after leaving; the existing chat layout is kept | G2 | Done | Headless browser checks |
+| G4 | Admin data generator, `/admin` on the local server and in the Vercel package | — | Done | Admin data, site and package tests pass, with a fake coach |
+| G5 | Admin design on real data | G4 | Done | Design B in `frontend/admin/`: four tabs including Mode comparison, Korean, Chinese and English; drawn from sample data on the local server |
 | G6 | D6 re-evaluation: baseline and the locked agent, 50 tasks × 3, then grading | G1 | Done | Run `lock-20261122` on 2026-11-22, $3.63; results in `design.md` |
-| G7 | Three-language documentation | G1–G3 | Done | `design.md`, `frontend/README.md`, `README.md`, this file |
+| G7 | Three-language documentation | G1–G5 | Done | `design.md`, `frontend/README.md`, `README.md`, this file |
+| G8 | Release: commit, package in WSL with the D6 data, rebuild the APK, deploy, then check streaming on Vercel and Android, `/admin` and the log lines | G3, G5, G6 | Not started | Needs judgment question 1 |
 
 **D6 result (2026-11-22):** the lock held (0 requests lost a first-stage verified example; all 93 fully verified requests skipped the continuation), but the locked agent no longer beats the baseline: pass 85.3% for both, strict 54.0% vs 55.3% (−1.6 pp, 95% CI −6.2 to +2.3). Actual cost $3.63. The full figures are in `design.md` (Re-evaluation (D6)), and the open question on the deployed default is R1 there.
 
@@ -195,9 +198,11 @@ The S0–S9 board above still shows the original plan. It was not updated after 
 
 ## Project Owner Judgment Questions
 
+1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that WSL can package the same `/admin`? The detail and the recommendation are in `frontend/README.md`, judgment question 2.
+
 The re-evaluation raised one question, on the submission wording and the deployed default: judgment question R1 in `design.md`.
 
-Nothing else is pending in this file. The open question on a coach question during a background search is in `frontend/README.md` (judgment question 1).
+The open question on a coach question during a background search is in `frontend/README.md` (judgment question 1).
 
 The four original planning questions (course constraints, time, resources, team) belonged to the course schedule, which ended with the submission (`SUBMISSION.md`). They are no longer open.
 
@@ -382,7 +387,7 @@ flowchart LR
 
 Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
 
-### 分阶段回答与核对位置锁定（D1–D3、D5、D6）
+### 分阶段回答、核对位置锁定与管理页（D1–D6）
 
 范围、合约和已知差距见 `design.md`（学习客户端）。只有 G6 产生了付费调用（3.63 美元）；其他检查都使用假模型。
 
@@ -391,8 +396,11 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | G1 | 在 agent 中锁定第一阶段核对通过的位置；所有位置都核对通过时跳过后续阶段 | — | 完成 | 教练和评估的单元测试通过 |
 | G2 | 服务端：按请求提供 `first`/`final` NDJSON，默认 JSON，模式变量，280 秒截止，每个请求一行日志 | G1 | 完成 | 服务端测试通过，包括真实 uvicorn 流和客户端中途离开 |
 | G3 | 学习端：先到的结果、提示条、播客页、离开后再回来；保留现有聊天布局 | G2 | 完成 | 无头浏览器检查 |
+| G4 | 管理页数据生成器，本地服务和 Vercel 包中的 `/admin` | — | 完成 | 管理页数据、页面和打包测试通过，使用假教练 |
+| G5 | 用真实数据完成管理页设计 | G4 | 完成 | 设计稿 B 放在 `frontend/admin/`：含「模式对比」在内的四个标签页，韩文、中文、英文；在本地服务上用样例数据绘制 |
 | G6 | D6 重新评估：baseline 和加锁的 agent，50 题 × 3 次，再评分 | G1 | 完成 | 2026-11-22 运行 `lock-20261122`，3.63 美元；结果见 `design.md` |
-| G7 | 三语文档 | G1–G3 | 完成 | `design.md`、`frontend/README.md`、`README.md` 和本文件 |
+| G7 | 三语文档 | G1–G5 | 完成 | `design.md`、`frontend/README.md`、`README.md` 和本文件 |
+| G8 | 发布：提交，在 WSL 中用 D6 数据打包，重新构建 APK，部署，然后检查 Vercel 和 Android 上的流式传输、`/admin` 和日志行 | G3、G5、G6 | 未开始 | 需要判断题 1 |
 
 **D6 结果（2026-11-22）：** 锁定生效（丢失第一阶段核对通过例句的请求为 0；93 个全部核对通过的请求都跳过了后续阶段），但加锁的 agent 不再优于 baseline：通过率都是 85.3%，严格通过率 54.0% 对 55.3%（−1.6 个百分点，95% 置信区间 −6.2 至 +2.3）。实际费用 3.63 美元。完整数据见 `design.md`（重新评估（D6）），关于部署默认值的待决问题是其中的 R1。
 
@@ -400,9 +408,11 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 ## 项目负责人判断题
 
+1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让 WSL 能打包出相同的 `/admin`？详情和建议见 `frontend/README.md` 判断题 2。
+
 重新评估带来一个待决问题，关于提交说明和部署默认值：见 `design.md` 判断题 R1。
 
-本文件没有其他待决定的事项。后台查找期间如何处理新的教练提问，这一待决问题见 `frontend/README.md`（判断题 1）。
+后台查找期间如何处理新的教练提问，这一待决问题见 `frontend/README.md`（判断题 1）。
 
 原来的四个计划问题（课程限制、时间、资源、团队）属于课程进度，课程已随提交结束（`SUBMISSION.md`），不再需要决定。
 
@@ -587,7 +597,7 @@ flowchart LR
 
 Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
-### 단계별 응답과 검증 슬롯 잠금(D1–D3, D5, D6)
+### 단계별 응답, 검증 슬롯 잠금, 어드민 화면(D1–D6)
 
 범위, 계약, 알려진 차이는 `design.md`(학습 클라이언트)에 있다. 유료 호출은 G6에서만 했다($3.63). 다른 확인은 모두 가짜 모델로 했다.
 
@@ -596,8 +606,11 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | G1 | agent에서 첫 단계 검증 슬롯 잠금, 모든 슬롯이 검증되면 후속 단계 생략 | — | 완료 | 코치와 평가 단위 테스트 통과 |
 | G2 | 서버: 요청 시 `first`/`final` NDJSON, 기본 JSON, 모드 변수, 280초 마감, 요청당 로그 한 줄 | G1 | 완료 | 실제 uvicorn 스트림과 클라이언트 이탈을 포함한 서버 테스트 통과 |
 | G3 | 학습자 앱: 먼저 보이는 결과, 공지, 팟캐스트 탭, 떠났다 돌아왔을 때. 기존 채팅 배치는 유지 | G2 | 완료 | 헤드리스 브라우저 확인 |
+| G4 | 어드민 데이터 생성기, 로컬 서버와 Vercel 패키지의 `/admin` | — | 완료 | 어드민 데이터·화면·패키지 테스트 통과, 가짜 코치 사용 |
+| G5 | 실제 데이터로 어드민 디자인 완성 | G4 | 완료 | 시안 B를 `frontend/admin/`에 넣음: '모드 비교'를 포함한 탭 네 개, 한국어·중국어·영어. 로컬 서버에서 샘플 데이터로 그려짐 |
 | G6 | D6 재평가: baseline과 잠금 agent, 50과제 × 3회, 이어서 심사 | G1 | 완료 | 2026-11-22 실행 `lock-20261122`, $3.63, 결과는 `design.md` |
-| G7 | 3개 언어 문서 | G1–G3 | 완료 | `design.md`, `frontend/README.md`, `README.md`, 이 파일 |
+| G7 | 3개 언어 문서 | G1–G5 | 완료 | `design.md`, `frontend/README.md`, `README.md`, 이 파일 |
+| G8 | 출시: 커밋, D6 데이터로 WSL에서 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄 확인 | G3, G5, G6 | 시작 전 | 판단 질문 1이 필요 |
 
 **D6 결과(2026-11-22):** 잠금은 동작했다(첫 단계 검증 예문을 잃은 요청 0건, 모두 검증된 요청 93건 전부 후속 생략). 그러나 잠금 agent는 더 이상 baseline보다 낫지 않다. 통과율은 둘 다 85.3%, strict는 54.0% 대 55.3%다(−1.6%p, 95% CI −6.2 ~ +2.3). 실제 비용은 $3.63이다. 전체 수치는 `design.md`의 재평가(D6)에 있고, 배포 기본값에 대한 질문은 그곳의 R1이다.
 
@@ -605,8 +618,10 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 ## 프로젝트 책임자 판단 질문
 
+1. **어드민 데이터를 git에 넣을지(G8을 막음):** D6 실행으로 만든 `frontend/admin/data.json`을 커밋해 WSL에서도 같은 `/admin`을 패키징할 수 있게 할까요? 자세한 내용과 추천은 `frontend/README.md` 판단 질문 2에 있습니다.
+
 재평가로 제출 서술과 배포 기본값에 대한 질문이 하나 생겼습니다. `design.md`의 판단 질문 R1에 있습니다.
 
-이 파일에는 이 밖에 지금 결정할 사항이 없습니다. 백그라운드 검색 중 새 코치 질문을 어떻게 할지는 `frontend/README.md`의 판단 질문 1에 있습니다.
+백그라운드 검색 중 새 코치 질문을 어떻게 할지는 `frontend/README.md`의 판단 질문 1에 있습니다.
 
 원래의 계획 질문 네 개(수업 제약, 시간, 리소스, 팀)는 수업 일정에 속한 것으로, 제출(`SUBMISSION.md`)과 함께 끝났습니다. 더 이상 결정할 사항이 아닙니다.

@@ -26,6 +26,11 @@ returned when the stream ends or the work ends, whichever is first.
 
 Each request that passes the access checks prints one JSON line to stdout (event=coach_request;
 fields in frontend/README.md). Nothing else about a request is stored.
+
+GET /admin/ serves the admin page (frontend/admin/, open like the deployment's /admin, D4, with
+X-Robots-Tag: noindex) and /admin/data.json (+ data-traces.json) its data, built from an evaluation
+run by frontend/admin_data.py (D5). COACH_ADMIN_DIR swaps the page folder and COACH_ADMIN_DATA the
+data folder, so another design or another run can be previewed on another port.
 """
 import argparse
 import asyncio
@@ -45,7 +50,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,9 +65,12 @@ from translation_agent_demo.storage.postgres import PostgresSettings, connect_da
 from translation_agent_demo.tools.search_corpus import search_corpus
 
 WEB = Path(__file__).with_name("web")
+ADMIN = Path(__file__).with_name("admin")
+ADMIN_DATA_FILES = ("data.json", "data-traces.json")  # the files an /admin page fetches (frontend/admin_data.py)
 NDJSON = "application/x-ndjson"
 DEADLINE_SECONDS = 280.0  # Vercel stops the function at maxDuration 300 s; stop the work first
 MAX_DEADLINE_SECONDS = 3600.0  # the most the local server's --deadline / COACH_DEADLINE_SECONDS may ask for
+NOINDEX = {"X-Robots-Tag": "noindex"}  # /admin is open to anyone with the address (D4), not to search engines
 POLL_SECONDS = 0.05  # how often a stream checks for the coach's next event
 QUESTION_HEAD_CHARS = 40  # how much of the request the log line keeps (D2, D5)
 _DONE = object()  # the coach's thread has ended
@@ -167,6 +175,7 @@ def log_record(mode: CoachMode, transport: str, question: str) -> dict:
 class Exchange:
     """One answered POST: the coach works in its own thread; the request reads its events until the deadline.
 
+    The log fields that compare with the admin data (frontend/admin_data.py) share its definitions:
     added_final counts examples verified after a first answer (0 when there was none), verified_final
     the verified examples the learner ends with. first_ms is when the client received the first answer,
     so only the stream has it: a JSON client sees nothing before total_ms."""
@@ -324,14 +333,73 @@ def _print(line: str) -> None:
     print(line, flush=True)
 
 
+# ------------------------------------------------------------------ the admin page
+def admin_folders(environ=os.environ) -> tuple[Path, Path] | None:
+    """The /admin page folder and its data folder: COACH_ADMIN_DIR and COACH_ADMIN_DATA when set (a
+    preview of another design or another run), else frontend/admin for both. None when there is no page.
+    A folder named by a variable must exist, and a data folder must hold data.json: else ValueError."""
+    def chosen(name: str) -> Path | None:
+        value = environ.get(name, "").strip()
+        if not value:
+            return None
+        folder = Path(value).expanduser()
+        if not folder.is_dir():
+            raise ValueError(f"{name} is not a folder: {folder}")
+        return folder.resolve()
+
+    page, data = chosen("COACH_ADMIN_DIR"), chosen("COACH_ADMIN_DATA")
+    if data is not None and not (data / ADMIN_DATA_FILES[0]).is_file():
+        raise ValueError(f"COACH_ADMIN_DATA has no {ADMIN_DATA_FILES[0]}: {data} "
+                         "(build it with python -m frontend.admin_data)")
+    page = page or (ADMIN if ADMIN.is_dir() else None)
+    return None if page is None else (page, data or page)
+
+
+class _Noindex:
+    """An ASGI wrapper that adds X-Robots-Tag: noindex to every response of the app it wraps."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        async def send_marked(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), (b"x-robots-tag", b"noindex")]}
+            await send(message)
+        await self.app(scope, receive, send_marked)
+
+
+def serve_admin(app: FastAPI, page: Path, data: Path) -> None:
+    """GET /admin/ from the page folder and /admin/<data file> from the data folder. Open, like the
+    deployment's /admin (D4), and marked noindex like it (frontend/vercel/package.py). Pages fetch their
+    data with relative URLs, so /admin redirects to /admin/."""
+    @app.get("/admin", include_in_schema=False)
+    def admin_root():
+        return RedirectResponse("admin/", status_code=307, headers=NOINDEX)
+
+    def data_file(name: str):
+        def serve():
+            path = data / name
+            if not path.is_file():
+                raise HTTPException(404, "admin_data_missing", headers=NOINDEX)
+            return FileResponse(path, media_type="application/json", headers={"Cache-Control": "no-cache", **NOINDEX})
+        return serve
+
+    for name in ADMIN_DATA_FILES:
+        app.add_api_route(f"/admin/{name}", data_file(name), methods=["GET"], include_in_schema=False)
+    app.mount("/admin", _Noindex(StaticFiles(directory=page, html=True)), name="admin")
+
+
 # ------------------------------------------------------------------ the app
 def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_ui=True, public_access=False,
              deadline_seconds: float = DEADLINE_SECONDS, log=None, clock=time.monotonic):
     """stream(question, mode, guard) -> events answers requests (the staged coach); answer(question) ->
     RunResult does instead, as one final answer; with neither, the local PostgreSQL index does.
 
-    mode defaults to COACH_SYSTEM / COACH_CONTINUATION, read now: an unknown value stops the start."""
+    mode defaults to COACH_SYSTEM / COACH_CONTINUATION, read now: an unknown value stops the start. With
+    serve_ui, so are COACH_ADMIN_DIR / COACH_ADMIN_DATA (admin_folders)."""
     mode = mode or CoachMode.from_environment()
+    admin = admin_folders() if serve_ui else None
     stream = stream or (answering(answer) if answer is not None else local_stream)
     log = log or _print
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -389,8 +457,11 @@ def make_app(answer=None, *, stream=None, mode: CoachMode | None = None, serve_u
             raise HTTPException(404, "apk_not_built")
         return FileResponse(apk, filename=apk.name, media_type="application/vnd.android.package-archive")
 
+    if admin is not None:
+        serve_admin(app, *admin)
     if serve_ui:
         app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
+    app.state.admin = admin
     return app
 
 
@@ -427,8 +498,11 @@ if __name__ == "__main__":
         parser.error("Set COACH_PAIR_CODE before listening on a network interface.")
     try:
         application = make_app(deadline_seconds=args.deadline)
-    except ValueError as exc:  # an unknown COACH_SYSTEM or COACH_CONTINUATION
+    except ValueError as exc:  # an unknown COACH_SYSTEM or COACH_CONTINUATION, or a missing admin folder
         parser.error(str(exc))
     if args.deadline != DEADLINE_SECONDS:
         print(f"deadline: {args.deadline:g} s per request", flush=True)
+    if application.state.admin:
+        page, data = application.state.admin
+        print(f"admin: http://{args.host}:{args.port}/admin/ (page {page}, data {data})", flush=True)
     uvicorn.run(application, host=args.host, port=args.port, access_log=False, proxy_headers=False)
