@@ -1,5 +1,6 @@
 """Tool contract checks without PostgreSQL or external provider requests."""
 
+from dataclasses import asdict
 from types import SimpleNamespace
 import json
 from uuid import UUID
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from translation_agent_demo.providers.embedding_protocol import (
     EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EmbeddingBatch, EmbeddingError,
 )
+from translation_agent_demo.storage.episode_audio import AudioClip
 from translation_agent_demo.storage.postgres import CorpusStorageError
 from translation_agent_demo.storage.retrieval import RetrievedChunk
 from translation_agent_demo.corpus.models import CueSpan
@@ -42,6 +44,49 @@ class SearchCorpusTests(unittest.TestCase):
         self.conn = SimpleNamespace(autocommit=True, info=SimpleNamespace(transaction_status=TransactionStatus.IDLE))
         self.embeddings = FixedEmbeddings()
         self.args = tool.SearchCorpusArgs(query="I did not mean that.")
+        audio = patch.object(tool, "audio_clips_for_chunks", return_value={})
+        self.audio = audio.start()
+        self.addCleanup(audio.stop)
+
+    def _row(self, chunk_id=1, start_ms=None):
+        return RetrievedChunk(
+            chunk_id=UUID(int=chunk_id), document_id=UUID(int=2), build_id=UUID(int=3),
+            source_key="podcast_index:1:1", feed_id=1, episode_id=1, episode_title="Source",
+            episode_url=None, transcript_url=None, language="en", text="Thanks for inviting me.",
+            similarity=.6, start_ms=start_ms, end_ms=None if start_ms is None else start_ms + 2000, speakers=(),
+            spans=(CueSpan(cue_index=0, start_char=0, end_char=23),), rights_status="approved",
+            rights_review_url=None, license_id="CC-BY-SA-4.0", license_url=None, attribution="Publisher",
+        )
+
+    def test_hits_carry_publisher_audio_clips_and_default_to_no_audio(self):
+        url = "https://cdn.example.org/ep.mp3"
+        self.audio.return_value = {UUID(int=1): AudioClip(url, 4000, 6000, False),
+                                   UUID(int=2): AudioClip(url, 85_000, 120_000, True)}
+        rows = (self._row(1, start_ms=4000), self._row(2), self._row(3))
+        with patch.object(tool, "has_searchable_corpus", return_value=True), \
+                patch.object(tool, "search_chunks", return_value=rows):
+            result = tool.search_corpus(self.args, conn=self.conn, embeddings=self.embeddings)
+        self.audio.assert_called_once_with(self.conn, [UUID(int=1), UUID(int=2), UUID(int=3)])
+        self.assertEqual([(h.audio_url, h.audio_start_ms, h.audio_end_ms, h.audio_estimated) for h in result.hits],
+                         [(url, 4000, 6000, False), (url, 85_000, 120_000, True), (None, None, None, False)])
+
+    def test_missing_audio_table_never_fails_a_search(self):
+        for error in (CorpusStorageError("no table"), ValueError("bad ids")):
+            self.audio.side_effect = error
+            with self.subTest(error=type(error).__name__), patch.object(tool, "has_searchable_corpus", return_value=True), \
+                    patch.object(tool, "search_chunks", return_value=(self._row(),)):
+                result = tool.search_corpus(self.args, conn=self.conn, embeddings=self.embeddings)
+            self.assertEqual((result.status, result.hits[0].audio_url, result.hits[0].audio_estimated),
+                             ("ok", None, False))
+
+    def test_audio_fields_need_a_url_and_an_ordered_clip(self):
+        hit = tool.CorpusSearchHit.model_validate(asdict(self._row()))
+        self.assertEqual((hit.audio_url, hit.audio_start_ms, hit.audio_end_ms, hit.audio_estimated),
+                         (None, None, None, False))
+        for audio in ({"audio_start_ms": 5}, {"audio_estimated": True},
+                      {"audio_url": "https://a.test/x.mp3", "audio_start_ms": 9, "audio_end_ms": 3}):
+            with self.subTest(audio=audio), self.assertRaises(ValidationError):
+                tool.CorpusSearchHit.model_validate({**asdict(self._row()), **audio})
 
     def test_tool_rejects_invalid_input_and_permission_overrides(self):
         cases = ({"query": " "}, {"query": "hello", "limit": 11},

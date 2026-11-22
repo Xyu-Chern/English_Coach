@@ -27,6 +27,7 @@ from ..providers.podcast_transcripts import (
     select_corpus_transcript,
 )
 from ..storage.corpus import has_transcript, save_transcript
+from ..storage.episode_audio import audio_from_episode, save_episode_audio
 from ..storage.podcast_sync import (
     cache_episodes,
     claim_next_feed,
@@ -156,6 +157,14 @@ def _episode_snapshot(
     return snapshot
 
 
+def _save_audio(conn: Connection, episodes: list[dict[str, Any]]) -> None:
+    """Keep enclosure URLs from the page already fetched; never blocks transcript sync."""
+    try:
+        save_episode_audio(conn, [audio for audio in map(audio_from_episode, episodes) if audio])
+    except (CorpusStorageError, ValueError):
+        pass  # E.g. migration 010 not yet applied; the audio backfill CLI can fill later.
+
+
 def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int, ...]) -> SyncResult:
     """Resume one due feed from the explicitly reviewed configured subscriptions.
 
@@ -235,6 +244,7 @@ def sync_feeds(conn: Connection, client: PodcastIndexClient, feed_ids: tuple[int
                 except (PodcastTranscriptError, ValueError, UnicodeError):
                     result.skipped_unusable_metadata += 1
             cache_episodes(conn, feed_id, snapshots, refresh_seconds=REFRESH_SECONDS)
+            _save_audio(conn, payload["items"])
             now = datetime.now(timezone.utc)
             state = replace(state, initial_scan_done=True, last_refresh_at=now,
                             next_refresh_at=now + timedelta(seconds=REFRESH_SECONDS))

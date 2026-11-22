@@ -74,6 +74,25 @@ The web and Android client asks for NDJSON (`Accept: application/x-ndjson, appli
 - **Accessibility and layout:** one polite live region speaks only when an answer arrives: the first examples and the end of the search. The notice sits outside the redrawn page, and a redraw keeps the cursor in the question box. The tabs are visible on the chat page too, so the **Podcast** tab's badge can be seen and tapped at once; the notice and the slot under the answer also link to it. With large text or a short screen, the question box no longer sticks to the bottom.
 - **Checks:** server tests cover the stream; the screen states were checked in a headless browser with tools kept outside the repository. `ask()` (the 300 s abort, the running limit, the JSON and relay fallbacks) has no automated test.
 
+## Podcast audio clips
+
+A card with a verified podcast citation can play its passage from the publisher's audio file. The contract, the local coverage figures and the known gaps are in `design.md` (**Podcast audio clips**).
+
+Fill the audio table once per database. Run from the repository root, with `uv run --python 3.11 --with-requirements translation_agent_demo/requirements.txt` right before `python`. The demo settings hold the database URL and the free Podcast Index key.
+
+```sh
+psql <DATABASE_URL> -f translation_agent_demo/storage/migrations/010_episode_audio.sql
+python -m translation_agent_demo.jobs.podcast_audio_backfill --dry-run    # count episodes without audio
+python -m translation_agent_demo.jobs.podcast_audio_backfill [--feed-ids 1,2] [--interval 0.5]
+```
+
+- **Backfill:** reads one archive page per feed, then looks up the remaining episodes one by one (`/episodes/byid`), `--interval` seconds apart and at most 3,000 requests. It stops on 401/403 and prints counts only. After that, `podcast_sync` keeps the enclosures of every page it fetches; without migration 010 it skips them and the sync goes on.
+- **Fields:** each citation carries `audio_url`, `audio_start_ms`, `audio_end_ms` and `audio_estimated`; `null` and `false` mean no audio. Stored cue timing is used when a chunk has it. Otherwise the time is interpolated between the transcript's time markers, 3 s early (without markers: the character position × the episode duration, 15 s early), with `audio_estimated: true`. The player loops the quote itself from `GET /api/audio/alignment`: marker-timed lines (`method: "anchored"`, the quote widened 3 s on each side) at once, replaced by speech recognition when it exists.
+- **Player:** **听这一段 / 이 부분 듣기** plays from the start and stops at the end (or 20 s after the start); **■ 停止 / 정지** stops it. An estimated start shows **大致位置 / 대략 위치 · m:ss**. Changing tabs stops playback, and a file that cannot play shows a short notice. The single `<audio preload="none">` loads nothing until the learner taps, and the service worker does not cache audio.
+- **Snapshot:** `python -m frontend.vercel.package` adds the four fields to each passage in `passages.json` when the packaging database has the audio table. Otherwise they are `null` and `false`.
+- **Licence:** the app plays the publisher's file from its original URL and never downloads, caches or redistributes it. The transcript licence does not cover the audio, which stays under the publisher's own terms.
+- **Checks:** unit tests cover the estimate, the search fields, the citation and the snapshot. With real search results from the local database (a fake coach, no model call), two estimated clips played from the publishers' files in headless Chrome. 16 sampled URLs answered a Range request with 206.
+
 ## Admin page (/admin)
 
 The admin page is open for viewing (D4): anyone with the address can see it, and the page says so. It ships in the same deployment as the app. Its evaluation data is one run's record, `data.json` built by `frontend/admin_data.py`. With a database, it also shows live requests and switches the mode (see **Live request log and mode switch**).
@@ -238,6 +257,25 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - **无障碍与布局：** 只有一个礼貌型实时区域，只在回答到达时播报：先到的例句和查找结束。提示条位于会重绘的页面之外，重绘时输入框保留光标。聊天页也显示标签栏，**播客** 页的徽标一眼可见，可以直接点开；提示条和回答下方的空位也链接到那里。字号很大或屏幕很矮时，输入框不再固定在底部。
 - **检查：** 服务端测试覆盖流式传输；各个画面状态在无头浏览器中检查过，所用工具不在仓库里。`ask()`（300 秒中止、同时查找上限、JSON 和中继回退）没有自动化测试。
 
+## 播客音频片段
+
+带有已核实播客出处的卡片，可以播放发布者音频文件中的对应段落。接口约定、本地覆盖数据和已知差距见 `design.md`（**播客音频片段**）。
+
+每个数据库只需填充一次音频表。在仓库根目录运行，并在 `python` 前加上 `uv run --python 3.11 --with-requirements translation_agent_demo/requirements.txt`。数据库 URL 和免费的 Podcast Index 密钥在 Demo 设置中。
+
+```sh
+psql <DATABASE_URL> -f translation_agent_demo/storage/migrations/010_episode_audio.sql
+python -m translation_agent_demo.jobs.podcast_audio_backfill --dry-run    # 统计缺少音频的节目
+python -m translation_agent_demo.jobs.podcast_audio_backfill [--feed-ids 1,2] [--interval 0.5]
+```
+
+- **回填：** 每个节目源先读一页存档，再逐集查询剩下的节目（`/episodes/byid`），请求间隔 `--interval` 秒，最多 3,000 次请求。遇到 401/403 时停止，只输出计数。之后 `podcast_sync` 会保存它取到的每一页里的 enclosure；没有迁移 010 时跳过保存，同步照常进行。
+- **字段：** 每个出处带有 `audio_url`、`audio_start_ms`、`audio_end_ms` 和 `audio_estimated`；`null` 和 `false` 表示没有音频。片段有字幕时间就用字幕时间。否则按文字稿的时间标记插值，提前 3 秒（没有时间标记时：字符位置比例 × 节目时长，提前 15 秒），并标记 `audio_estimated: true`。播放器按 `GET /api/audio/alignment` 循环引用句本身：立即得到按时间标记计时的字幕行（`method: "anchored"`，引用句前后各放宽 3 秒），有语音识别结果时替换。
+- **播放器：** **听这一段 / 이 부분 듣기** 从起点播放，到终点（或起点后 20 秒）停止；**■ 停止 / 정지** 可随时停止。估算的起点显示 **大致位置 / 대략 위치 · m:ss**。切换标签会停止播放，文件无法播放时显示简短提示。唯一的 `<audio preload="none">` 在学习者点按前不加载任何内容，service worker 也不缓存音频。
+- **快照：** 打包用的数据库有音频表时，`python -m frontend.vercel.package` 会在 `passages.json` 的每个段落中加上这四个字段；否则它们为 `null` 和 `false`。
+- **许可：** 应用从原始 URL 播放发布者的文件，从不下载、缓存或再分发。字幕许可不涵盖音频，音频仍受发布者自己的条款约束。
+- **检查：** 单元测试覆盖估算、搜索字段、出处和快照。用本地数据库的真实搜索结果（假教练，不调用模型）在无头 Chrome 中检查，两个估算片段都能从发布者文件播放。抽查的 16 个 URL 对 Range 请求都返回 206。
+
 ## 管理页（/admin）
 
 管理页查看不设保护（D4）：知道网址的人都能查看，页面上也会说明这一点。它和应用放在同一个部署里。评估数据是一次运行的记录，即 `frontend/admin_data.py` 生成的 `data.json`。有数据库时，页面还会显示线上请求并可切换模式（见 **线上请求日志与模式切换**）。
@@ -401,6 +439,25 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - **한 번에 한 검색:** 서버는 프로세스당 요청 하나만 처리한다. 그래서 백그라운드 검색이 끝날 때까지 새 코치 질문은 기다리며, 입력창 아래에 그 이유를 보여 준다. 표현 모음 검색은 막지 않는다.
 - **접근성과 배치:** polite 라이브 영역 하나가 답이 도착할 때만 읽어 준다(처음 예문, 검색 끝). 공지는 다시 그려지는 화면 밖에 있고, 다시 그릴 때 입력창의 커서를 유지한다. 채팅 화면에도 탭을 보여 주므로 **팟캐스트** 탭의 배지를 바로 보고 누를 수 있다. 공지와 답 아래 빈 자리도 그 탭으로 연결된다. 글자가 아주 크거나 화면이 낮으면 입력창을 아래에 고정하지 않는다.
 - **확인:** 서버 테스트가 스트리밍을 다룬다. 화면 상태는 저장소 밖 도구로 헤드리스 브라우저에서 확인했다. `ask()`(300초 중단, 동시 검색 제한, JSON·릴레이 대체 흐름)에는 자동 테스트가 없다.
+
+## 팟캐스트 음성 구간
+
+검증된 팟캐스트 출처가 있는 카드는 게시자 음성 파일에서 해당 구간을 재생할 수 있다. 계약, 로컬 적용 수치, 알려진 차이는 `design.md`(**팟캐스트 음성 구간**)에 있다.
+
+음성 테이블은 DB마다 한 번 채운다. 저장소 루트에서 실행하고, `python` 바로 앞에 `uv run --python 3.11 --with-requirements translation_agent_demo/requirements.txt`를 붙인다. DB URL과 무료 Podcast Index 키는 데모 설정에 있다.
+
+```sh
+psql <DATABASE_URL> -f translation_agent_demo/storage/migrations/010_episode_audio.sql
+python -m translation_agent_demo.jobs.podcast_audio_backfill --dry-run    # 음성이 없는 에피소드 수
+python -m translation_agent_demo.jobs.podcast_audio_backfill [--feed-ids 1,2] [--interval 0.5]
+```
+
+- **백필:** 피드마다 아카이브 한 페이지를 읽고, 남은 에피소드는 하나씩 조회한다(`/episodes/byid`). 요청 간격은 `--interval`초, 최대 3,000회다. 401/403이면 멈추고, 개수만 출력한다. 그 뒤로는 `podcast_sync`가 가져온 페이지마다 enclosure를 저장한다. 마이그레이션 010이 없으면 저장을 건너뛰고 동기화는 계속한다.
+- **필드:** 각 citation에 `audio_url`, `audio_start_ms`, `audio_end_ms`, `audio_estimated`가 실린다. `null`과 `false`는 음성 없음이다. 청크에 저장된 대본 시각이 있으면 그 값을 쓴다. 없으면 대본 시간 표시 사이를 보간해 3초 앞에서 시작하고(시간 표시가 없으면 문자 위치 비율 × 에피소드 길이에서 15초 앞), `audio_estimated: true`로 표시한다. 플레이어는 `GET /api/audio/alignment`로 인용 문장 자체를 반복한다. 시간 표시로 맞춘 자막 줄(`method: "anchored"`, 인용 앞뒤 3초씩 확장)을 바로 받고, 음성 인식 결과가 있으면 그것으로 바꾼다.
+- **플레이어:** **听这一段 / 이 부분 듣기**는 시작 위치부터 재생하고 끝(없으면 시작 후 20초)에서 멈춘다. **■ 停止 / 정지**로 멈출 수 있다. 추정한 시작은 **大致位置 / 대략 위치 · m:ss**로 보인다. 탭을 옮기면 재생이 멈추고, 재생할 수 없는 파일이면 짧은 안내가 뜬다. `<audio preload="none">` 하나는 학습자가 누르기 전까지 아무것도 불러오지 않고, 서비스 워커는 음성을 캐시하지 않는다.
+- **스냅샷:** 패키징 DB에 음성 테이블이 있으면 `python -m frontend.vercel.package`가 `passages.json`의 각 구간에 네 필드를 붙인다. 없으면 `null`과 `false`다.
+- **라이선스:** 앱은 게시자의 파일을 원래 URL에서 재생하며, 내려받거나 캐시하거나 재배포하지 않는다. 대본 라이선스는 음성에 적용되지 않고, 음성은 게시자의 조건을 따른다.
+- **확인:** 단위 테스트가 추정, 검색 필드, citation, 스냅샷을 다룬다. 로컬 DB의 실제 검색 결과(가짜 코치, 모델 호출 없음)로 헤드리스 Chrome에서 확인했을 때 추정 구간 두 개가 게시자 파일에서 재생됐다. 표본 URL 16개는 Range 요청에 모두 206으로 답했다.
 
 ## 어드민 화면(/admin)
 

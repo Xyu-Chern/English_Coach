@@ -137,7 +137,8 @@ class RequestLogTests(unittest.TestCase):
         self.assertTrue({"frontend/request_log.py", "frontend/sql/request_log.sql",
                          "frontend/admin_data.py"} <= set(package.FUNCTION_FILES))
         rewrites = package.vercel_config()["rewrites"]
-        self.assertEqual({r["source"] for r in rewrites}, {"/admin/requests.json", "/admin/mode"})
+        self.assertEqual({r["source"] for r in rewrites},
+                         {"/admin/requests.json", "/admin/mode", "/api/audio/alignment"})
         self.assertTrue(all(r["destination"] == "/api/search" for r in rewrites))
         with tempfile.TemporaryDirectory() as temporary, patch("sys.stdout"), patch("sys.stderr"), \
                 patch.dict(os.environ, {"COACH_ADMIN_RUN": "", "COACH_SYSTEM": ""}):

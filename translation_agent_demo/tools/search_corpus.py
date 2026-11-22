@@ -1,6 +1,7 @@
 """Read-only corpus search contract; no Agent or HTTP endpoint is registered here."""
 
 from dataclasses import asdict
+from uuid import UUID
 
 from translation_agent_demo.agents.contracts import (
     CorpusSearchHit, SearchCorpusArgs, SearchCorpusError, SearchCorpusResult, SearchSpan,
@@ -12,8 +13,9 @@ from psycopg.pq import TransactionStatus
 from ..corpus.chunking import ChunkingSettings
 from ..providers.embedding_protocol import EmbeddingError, EmbeddingProvider
 from ..providers.embeddings import embedding_client
+from ..storage.episode_audio import NO_AUDIO, AudioClip, audio_clips_for_chunks
 from ..storage.postgres import CorpusStorageError
-from ..storage.retrieval import count_literal_chunks, has_searchable_corpus, search_chunks
+from ..storage.retrieval import RetrievedChunk, count_literal_chunks, has_searchable_corpus, search_chunks
 
 SEARCH_DESCRIPTION = (
     "Find candidate passages in the stored podcast transcript corpus. "
@@ -37,6 +39,21 @@ def search_corpus_definition() -> dict:
     """Provider-neutral function description and Pydantic-generated input schema."""
     return {"name": "search_corpus", "description": SEARCH_DESCRIPTION,
             "parameters": SearchCorpusArgs.model_json_schema()}
+
+
+def _audio_clips(conn: Connection, rows: tuple[RetrievedChunk, ...]) -> dict[UUID, AudioClip]:
+    """Publisher audio per chunk: stored cue timing, else an early estimate (audio_estimated=True).
+
+    Audio is optional playback metadata: a missing, empty or unreadable podcast_episode_audio
+    table leaves hits without audio instead of failing a search that already succeeded. The
+    connection is autocommit, so a failed lookup does not affect later statements.
+    """
+    if not rows:
+        return {}
+    try:
+        return audio_clips_for_chunks(conn, [row.chunk_id for row in rows])
+    except (CorpusStorageError, ValueError):
+        return {}
 
 
 def search_corpus(
@@ -98,7 +115,9 @@ def search_corpus(
             rows = search_chunks(conn, batch.vectors[0], **options)
     except CorpusStorageError:
         raise SearchCorpusError("storage_unavailable", "Could not search the stored corpus.") from None
-    hits = tuple(CorpusSearchHit.model_validate(asdict(row)) for row in rows)
+    clips = _audio_clips(conn, rows)
+    hits = tuple(CorpusSearchHit.model_validate({**asdict(row), **clips.get(row.chunk_id, NO_AUDIO).as_fields()})
+                 for row in rows)
     return SearchCorpusResult(status="ok", **profile, input_tokens=batch.input_tokens, hits=hits,
                               search_mode=mode, literal_candidate_count=literal_count,
                               literal_corpus_count=corpus_count)

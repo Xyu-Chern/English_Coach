@@ -20,6 +20,11 @@ const symbols = {
   back: '<path d="m14 5-7 7 7 7"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
   close: '<path d="m6 6 12 12m0-12L6 18"/>',
+  play: '<path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/>',
+  pause:
+    '<path fill="currentColor" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/>',
+  repeat:
+    '<path d="m17 3 3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3m16-2v2a3 3 0 0 1-3 3H4"/>',
 };
 const icon = (name) =>
   '<svg viewBox="0 0 24 24" aria-hidden="true">' + symbols[name] + "</svg>";
@@ -689,10 +694,609 @@ function resultCard(e) {
     "</button></div><p>" +
     esc(e.meaning ? label(e.meaning) : e.note) +
     "</p>" +
+    listen(e, i) +
     source(e.citation) +
     "</article>"
   );
 }
+// ------------------------------------------------------------ podcast clip player (PR6 v2)
+// One shared <audio preload="none"> plays the cited part of the episode. "Listen" opens a clip
+// player under the card and asks the server where the quote is spoken (GET /api/audio/alignment):
+// "ready" gives the caption lines around the quote with their timing; "pending" is asked again
+// every 1.5 s for up to 40 s; anything else falls back to the citation's own estimate, shown as
+// "rough". A "ready" answer timed from the transcript's time markers (method "anchored", no speech
+// recognition) plays at once; while it says "refining" the server is still recognising the audio, so
+// it is asked again in the background and a better answer replaces the lines (refinePlace).
+// Loop math follows draw-lang's clipLoop: the range is the quote, the whole excerpt or one
+// tapped line, played with 400 ms of padding, then repeated or stopped at its end.
+const CLIP_DEFAULT_MS = 20000,
+  PAD_MS = 400,
+  RATES = [0.75, 1, 1.25],
+  ALIGN_POLL_MS = 1500,
+  ALIGN_WAIT_MS = 40000,
+  REFINE_WAIT_MS = 90000,
+  LOAD_TIMEOUT_MS = 15000;
+const player =
+  $("clip") ||
+  document.body.appendChild(
+    Object.assign(document.createElement("audio"), { id: "clip", preload: "none" }),
+  );
+const aligned = new Map(); // clip key -> ready model, so a reopened clip plays at once
+let clipRate = RATES.includes(read("clip-rate", 1)) ? read("clip-rate", 1) : 1,
+  clipLoop = true,
+  clipFrame = 0,
+  clipAttempt = 0,
+  clipTimer = 0;
+// The open clip: {key, cite, phase: "finding"|"ready", model, state: "idle"|"loading"|"playing"|
+// "paused"|"error", range: "match"|"all"|line index, plays, active (line index or -1), late}
+let clip = null;
+const msOf = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+function hasAudio(c) {
+  return Boolean(c && url(c.audio_url));
+}
+function clipKey(c) {
+  return url(c.audio_url) + "#" + (c.chunk_id || msOf(c.audio_start_ms)) + "#" + (c.quote || "");
+}
+// What the player works on: caption lines in ms, the lines the quote overlaps (match), the quote's
+// own time when known, and whether the position is only estimated.
+function clipModel(src, cues, quote, method, title) {
+  let match = { first: 0, last: cues.length - 1 };
+  if (quote) {
+    const hit = cues.flatMap((q, k) => (q.end > quote.start && q.start < quote.end ? [k] : []));
+    let near = 0;
+    cues.forEach((q, k) => {
+      if (Math.abs(q.start - quote.start) < Math.abs(cues[near].start - quote.start)) near = k;
+    });
+    match = hit.length ? { first: hit[0], last: hit[hit.length - 1] } : { first: near, last: near };
+  }
+  return { src, cues, quote, match, method, rough: method === "estimated", title, marks: [] };
+}
+// The citation's own fields: one line (the quote) from audio_start_ms to audio_end_ms or +20 s.
+function roughModel(c) {
+  const known = msOf(c.audio_start_ms) !== null,
+    start = known ? c.audio_start_ms : 0,
+    stop = msOf(c.audio_end_ms),
+    end = stop !== null && stop > start ? stop : start + CLIP_DEFAULT_MS;
+  return clipModel(
+    url(c.audio_url),
+    [{ text: c.quote || "", start, end }],
+    null,
+    c.audio_estimated === true || !known ? "estimated" : "stored",
+    c.episode_title,
+  );
+}
+function alignedModel(c, r) {
+  const src = url(r.audio_url) || url(c.audio_url),
+    cues = (Array.isArray(r.cues) ? r.cues : [])
+      .filter(
+        (q) =>
+          q &&
+          typeof q.text === "string" &&
+          q.text.trim() &&
+          msOf(q.start_ms) !== null &&
+          msOf(q.end_ms) !== null &&
+          q.end_ms > q.start_ms,
+      )
+      .map((q) => ({ text: q.text.trim(), start: q.start_ms, end: q.end_ms }))
+      .sort((a, b) => a.start - b.start)
+      .slice(0, 60),
+    from = msOf(r.quote_start_ms),
+    to = msOf(r.quote_end_ms),
+    quote = from !== null && to !== null && to > from ? { start: from, end: to } : null;
+  if (!src || (!cues.length && !quote)) return null;
+  const lines = cues.length ? cues : [{ text: c.quote || "", start: quote.start, end: quote.end }],
+    method = ["asr", "stored", "anchored", "estimated"].includes(r.method) ? r.method : "estimated",
+    m = clipModel(src, lines, quote, method, c.episode_title);
+  if (cues.length) m.marks = quoteMarks(lines, m.match, c.quote || "");
+  m.refining = r.refining === true;
+  return m;
+}
+// Where the quote's words sit in the captions (ASR text can differ a little from the transcript):
+// the run of caption words sharing the most words with the quote, as one [from, to) character range
+// per line. Without a convincing run the quote's lines are only tinted.
+function quoteMarks(cues, span, quote) {
+  const words = (s) =>
+    Array.from(s.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'’]*/gu), (x) => ({
+      w: x[0].toLowerCase().replace(/['’]/g, ""),
+      i: x.index,
+      j: x.index + x[0].length,
+    }));
+  const q = words(quote).map((x) => x.w),
+    want = new Set(q),
+    toks = [];
+  for (let k = Math.max(0, span.first - 1); k <= Math.min(cues.length - 1, span.last + 1); k++)
+    words(cues[k].text).forEach((t) => toks.push({ ...t, k }));
+  let best = 0,
+    at = 0;
+  for (let s = 0; s < toks.length; s++) {
+    let hit = 0;
+    for (let t = s; t < Math.min(toks.length, s + q.length); t++) if (want.has(toks[t].w)) hit++;
+    if (hit > best) [best, at] = [hit, s];
+  }
+  if (!q.length || best < Math.min(q.length, Math.max(2, Math.ceil(q.length / 2)))) return [];
+  const run = toks.slice(at, at + q.length);
+  while (run.length && !want.has(run[run.length - 1].w)) run.pop();
+  while (run.length && !want.has(run[0].w)) run.shift();
+  const marks = [];
+  run.forEach((t) => (marks[t.k] = marks[t.k] ? [marks[t.k][0], t.j] : [t.i, t.j]));
+  return marks;
+}
+function clipSpan(m, range) {
+  if (range === "match") return m.match;
+  if (range === "all") return { first: 0, last: m.cues.length - 1 };
+  return { first: range, last: range };
+}
+function clipBounds(m, range) {
+  if (range === "match" && m.quote)
+    return { start: Math.max(0, m.quote.start - PAD_MS), end: m.quote.end + PAD_MS };
+  const s = clipSpan(m, range);
+  return { start: Math.max(0, m.cues[s.first].start - PAD_MS), end: m.cues[s.last].end + PAD_MS };
+}
+function mmss(ms) {
+  const s = Math.floor(ms / 1000),
+    two = (n) => String(n).padStart(2, "0");
+  return (
+    (s >= 3600 ? Math.floor(s / 3600) + ":" + two(Math.floor(s / 60) % 60) : Math.floor(s / 60)) +
+    ":" +
+    two(s % 60)
+  );
+}
+// ---- clip player: markup
+function listenLabel(open) {
+  return open ? "■ " + T("关闭", "닫기") : "▶ " + T("听这一段", "이 부분 듣기");
+}
+function listen(e, i) {
+  if (!hasAudio(e.citation)) return "";
+  return (
+    '<div class="listen-box" data-listen-box="' + i + '">' + listenBody(e.citation, i) + "</div>"
+  );
+}
+function listenBody(c, i) {
+  const open = Boolean(clip && clip.key === clipKey(c)),
+    m = aligned.get(clipKey(c)) || roughModel(c);
+  return (
+    '<div class="listen"><button type="button" class="listen-btn" data-listen="' +
+    i +
+    '" aria-expanded="' +
+    open +
+    '">' +
+    listenLabel(open) +
+    "</button>" +
+    (open ? "" : '<span class="listen-at' + (m.rough ? " rough" : "") + '">' + placeText(m) + "</span>") +
+    "</div>" +
+    (open ? clipPanel() : "")
+  );
+}
+function placeText(m) {
+  const at = m.quote ? m.quote.start : m.cues[m.match.first].start;
+  return (
+    (m.rough
+      ? T("大致位置", "대략 위치") + " · "
+      : m.method === "asr"
+        ? T("已按音频校准", "음성으로 맞춘 위치") + " · "
+        : m.method === "anchored"
+          ? T("按文字稿时间标记", "대본 시간 표시 기준") + " · "
+          : "") + mmss(at)
+  );
+}
+function playFace() {
+  return clip.state === "loading"
+    ? '<span class="spinner" aria-hidden="true"></span>'
+    : icon(clip.state === "playing" ? "pause" : "play");
+}
+function playLabel() {
+  return clip.state === "playing" || clip.state === "loading"
+    ? T("暂停", "일시정지")
+    : T("播放", "재생");
+}
+function rateLabel() {
+  return T("播放速度 " + clipRate + " 倍，点一下切换", "재생 속도 " + clipRate + "배, 눌러서 바꾸기");
+}
+function loopCount() {
+  return clipLoop && clip.state !== "idle" && clip.state !== "error"
+    ? T(clip.plays + " 次", clip.plays + "회")
+    : "";
+}
+function cueClass(m, span, k) {
+  return (
+    "clip-cue" +
+    (k >= m.match.first && k <= m.match.last ? " match" : "") +
+    (k === clip.active ? " active" : "") +
+    (k < span.first || k > span.last ? " out" : "")
+  );
+}
+function cueText(m, k) {
+  const t = m.cues[k].text,
+    r = m.marks[k];
+  return r
+    ? esc(t.slice(0, r[0])) + "<mark>" + esc(t.slice(r[0], r[1])) + "</mark>" + esc(t.slice(r[1]))
+    : esc(t);
+}
+function clipPanel() {
+  if (clip.phase === "finding")
+    return (
+      '<div class="clip finding" data-clip-panel><p class="clip-find" role="status">' +
+      '<span class="spinner" aria-hidden="true"></span><span>' +
+      T("正在查找准确位置…", "정확한 위치 찾는 중…") +
+      '</span></p><button type="button" class="clip-now" data-clip="rough">' +
+      T("先听大致位置", "대략 위치로 먼저 듣기") +
+      "</button></div>"
+    );
+  const m = clip.model,
+    span = clipSpan(m, clip.range),
+    many = m.cues.length > 1,
+    seg = (v, text) =>
+      '<button type="button" data-clip-range="' +
+      v +
+      '" aria-pressed="' +
+      (clip.range === v) +
+      '">' +
+      text +
+      "</button>";
+  return (
+    '<div class="clip" data-clip-panel><div class="clip-controls">' +
+    '<button type="button" class="clip-play" data-clip="toggle" aria-label="' +
+    playLabel() +
+    '">' +
+    playFace() +
+    '</button><div class="clip-meta"><strong class="clip-title">' +
+    esc(m.title || T("播客原声", "팟캐스트 원음")) +
+    '</strong><span class="clip-at' +
+    (m.rough ? " rough" : "") +
+    '">' +
+    placeText(m) +
+    '</span></div><button type="button" class="clip-rate" data-clip="rate" aria-label="' +
+    rateLabel() +
+    '">' +
+    clipRate +
+    "×</button></div>" +
+    '<div class="clip-bar"><button type="button" class="clip-loop" data-clip="loop" aria-pressed="' +
+    clipLoop +
+    '">' +
+    icon("repeat") +
+    "<span>" +
+    T("循环", "반복") +
+    '</span><span class="loop-count">' +
+    loopCount() +
+    "</span></button>" +
+    (many
+      ? '<div class="clip-seg" role="group" aria-label="' +
+        T("循环范围", "반복 구간") +
+        '">' +
+        seg("match", T("这一句", "이 문장")) +
+        seg("all", T("含上下文", "앞뒤 포함")) +
+        "</div>"
+      : "") +
+    "</div>" +
+    (m.rough
+      ? '<p class="clip-note">' +
+        (clip.late
+          ? T(
+              "准确位置还没准备好，先按大致位置播放。引用句可能稍早或稍晚出现。",
+              "정확한 위치가 아직 준비되지 않아 대략 위치로 들려드려요. 인용 문장이 조금 앞이나 뒤에서 나올 수 있어요.",
+            )
+          : T(
+              "大致位置：按字幕文字位置估算，引用句可能稍早或稍晚出现。",
+              "대략 위치예요. 글자 위치로 추정해서 인용 문장이 조금 앞이나 뒤에서 나올 수 있어요.",
+            )) +
+        "</p>"
+      : "") +
+    '<p class="clip-note error" role="alert"' +
+    (clip.state === "error" ? "" : " hidden") +
+    ">" +
+    T("无法加载音频，字幕仍可查看。", "오디오를 불러오지 못했어요. 자막은 그대로 볼 수 있어요.") +
+    '</p><ol class="clip-cues" aria-label="' +
+    (many
+      ? T("字幕。点一句只循环这一句", "자막. 문장을 누르면 그 문장만 반복해요")
+      : T("字幕", "자막")) +
+    '">' +
+    m.cues
+      .map(
+        (q, k) =>
+          '<li><button type="button" lang="en" class="' +
+          cueClass(m, span, k) +
+          '" data-clip-cue="' +
+          k +
+          '"' +
+          (k === clip.active ? ' aria-current="true"' : "") +
+          ">" +
+          cueText(m, k) +
+          "</button></li>",
+      )
+      .join("") +
+    "</ol></div>"
+  );
+}
+// Rebuild the listen rows (a clip opened, closed or found its place) without redrawing the page.
+function redrawClip() {
+  const had = document.activeElement,
+    inside = had && had.closest && had.closest("[data-listen-box]"),
+    back = inside && had.dataset.listen;
+  document.querySelectorAll("[data-listen-box]").forEach((box) => {
+    const i = Number(box.dataset.listenBox),
+      e = visible[i];
+    if (e && hasAudio(e.citation)) box.innerHTML = listenBody(e.citation, i);
+  });
+  if (!inside) return;
+  const next =
+    (back !== undefined && document.querySelector('[data-listen="' + back + '"]')) ||
+    document.querySelector('[data-clip="toggle"]');
+  if (next) next.focus({ preventScroll: true });
+}
+// Repaint the open player in place: play state, loop, rate, range and the spoken line.
+function paintClip() {
+  if (!clip || !clip.model) return;
+  const m = clip.model,
+    span = clipSpan(m, clip.range);
+  document.querySelectorAll("[data-clip-panel]").forEach((p) => {
+    const play = p.querySelector('[data-clip="toggle"]');
+    if (!play) return;
+    play.innerHTML = playFace();
+    play.setAttribute("aria-label", playLabel());
+    const loop = p.querySelector('[data-clip="loop"]'),
+      rate = p.querySelector('[data-clip="rate"]');
+    loop.setAttribute("aria-pressed", String(clipLoop));
+    loop.querySelector(".loop-count").textContent = loopCount();
+    rate.textContent = clipRate + "×";
+    rate.setAttribute("aria-label", rateLabel());
+    p.querySelectorAll("[data-clip-range]").forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.clipRange === clip.range)),
+    );
+    p.querySelector(".clip-note.error").hidden = clip.state !== "error";
+    p.querySelectorAll("[data-clip-cue]").forEach((b) => {
+      const k = Number(b.dataset.clipCue);
+      b.className = cueClass(m, span, k);
+      if (k === clip.active) b.setAttribute("aria-current", "true");
+      else b.removeAttribute("aria-current");
+    });
+  });
+}
+// ---- clip player: finding the place
+async function fetchPlace(c) {
+  const headers = {},
+    code = privateServer(apiBase()) && read("access:" + apiBase(), "");
+  if (code) headers["X-Coach-Code"] = code;
+  const query = new URLSearchParams({
+      chunk_id: String(c.chunk_id),
+      quote: String(c.quote || "").slice(0, 1000),
+    }),
+    stop = new AbortController(),
+    limit = setTimeout(() => stop.abort(), 8000);
+  try {
+    const r = await fetch(apiBase() + "/api/audio/alignment?" + query, {
+      headers,
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: stop.signal,
+    });
+    if (!r.ok) return null;
+    const body = await r.json();
+    return body && typeof body === "object" ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(limit);
+  }
+}
+async function findPlace(own) {
+  const until = Date.now() + ALIGN_WAIT_MS;
+  let r = null;
+  for (;;) {
+    r = await fetchPlace(own.cite);
+    if (clip !== own || own.phase !== "finding") return;
+    if (!r || r.status !== "pending" || Date.now() + ALIGN_POLL_MS > until) break;
+    await new Promise((done) => setTimeout(done, ALIGN_POLL_MS));
+    if (clip !== own || own.phase !== "finding") return;
+  }
+  const m = r && r.status === "ready" ? alignedModel(own.cite, r) : null;
+  if (m) aligned.set(own.key, m);
+  showClip(own, m || roughModel(own.cite), Boolean(r && r.status === "pending"));
+  if (m && m.refining) refinePlace(own);
+}
+// The marker-timed lines are playing; ask again until recognition has finished (or failed), then
+// replace the model. Playback restarts at the new range only if it was playing.
+async function refinePlace(own) {
+  const until = Date.now() + REFINE_WAIT_MS;
+  while (Date.now() + ALIGN_POLL_MS <= until) {
+    await new Promise((done) => setTimeout(done, ALIGN_POLL_MS));
+    if (clip !== own) return;
+    const r = await fetchPlace(own.cite);
+    if (clip !== own) return;
+    if (!r || r.status === "pending" || (r.status === "ready" && r.refining === true)) continue;
+    const m = r.status === "ready" ? alignedModel(own.cite, r) : null;
+    if (!m) break;
+    const playing = own.state === "playing" || own.state === "loading";
+    aligned.set(own.key, m);
+    own.model = m;
+    own.late = false;
+    if (typeof own.range === "number") own.range = "match"; // the lines changed
+    redrawClip();
+    if (playing) playFrom(clipBounds(m, own.range).start);
+    return;
+  }
+  if (clip === own && own.model) own.model.refining = false;
+}
+function showClip(own, model, late) {
+  own.phase = "ready";
+  own.model = model;
+  own.late = late;
+  redrawClip();
+  playFrom(clipBounds(model, own.range).start); // without a fresh tap the browser may want ▶
+}
+function openClip(e) {
+  const c = e && e.citation;
+  if (!hasAudio(c)) return;
+  const key = clipKey(c);
+  if (clip && clip.key === key) return closeClip();
+  if (clip) shutClip();
+  clip = { key, cite: c, phase: "finding", model: null, state: "idle", range: "match", plays: 1, active: -1, late: false };
+  const known = aligned.get(key);
+  if (known || !c.chunk_id || (staticOnly && !read("server", ""))) {
+    showClip(clip, known || roughModel(c), false);
+    if (known && known.refining) refinePlace(clip);
+    return;
+  }
+  redrawClip();
+  findPlace(clip);
+}
+function shutClip() {
+  ++clipAttempt;
+  cancelAnimationFrame(clipFrame);
+  clearTimeout(clipTimer);
+  clip = null;
+  player.pause();
+}
+function closeClip() {
+  if (!clip) return;
+  shutClip();
+  redrawClip();
+}
+// ---- clip player: playback and the loop
+function clipNow() {
+  return player.currentTime * 1000;
+}
+function clipFail() {
+  cancelAnimationFrame(clipFrame);
+  clearTimeout(clipTimer);
+  clip.state = "error";
+  paintClip();
+}
+function playFrom(at) {
+  const m = clip.model,
+    mine = ++clipAttempt;
+  cancelAnimationFrame(clipFrame);
+  clearTimeout(clipTimer);
+  clip.state = "loading";
+  clip.seek = at;
+  if (player.dataset.src !== m.src || player.error) {
+    player.dataset.src = m.src;
+    // A media fragment starts the first load at the clip; loadedmetadata seeks if it was ignored.
+    player.src = new URL(m.src).hash ? m.src : m.src + "#t=" + at / 1000;
+  } else if (player.readyState >= 1) player.currentTime = at / 1000;
+  player.defaultPlaybackRate = clipRate;
+  player.playbackRate = clipRate;
+  paintClip();
+  if (player.readyState < 1)
+    clipTimer = setTimeout(() => {
+      if (clip && mine === clipAttempt && player.readyState < 1) clipFail();
+    }, LOAD_TIMEOUT_MS);
+  player.play().then(
+    () => {
+      if (!clip || mine !== clipAttempt) return;
+      clearTimeout(clipTimer);
+      clip.state = "playing";
+      paintClip();
+      cancelAnimationFrame(clipFrame);
+      clipFrame = requestAnimationFrame(clipTick);
+    },
+    (err) => {
+      if (!clip || mine !== clipAttempt) return;
+      clearTimeout(clipTimer);
+      const name = err && err.name;
+      if (name === "AbortError" || name === "NotAllowedError") {
+        clip.state = name === "AbortError" && player.readyState ? "paused" : "idle";
+        paintClip();
+      } else clipFail();
+    },
+  );
+}
+// Called every frame while playing (and on timeupdate, which keeps going in a background tab).
+function clipCheck() {
+  if (!clip || !clip.model || clip.state !== "playing") return "stop";
+  const m = clip.model,
+    b = clipBounds(m, clip.range);
+  let pos = clipNow();
+  if (pos < b.start - 1500) {
+    player.currentTime = b.start / 1000; // the browser ignored the first seek
+    pos = b.start;
+  }
+  const span = clipSpan(m, clip.range),
+    found = m.cues.findIndex((q) => pos >= q.start && pos < q.end),
+    active = found >= span.first && found <= span.last ? found : -1; // not the line in the padding
+  let changed = active !== clip.active;
+  clip.active = active;
+  if (pos >= b.end) {
+    if (!clipLoop) {
+      clip.state = "paused";
+      player.pause();
+      paintClip();
+      return "stop";
+    }
+    player.currentTime = b.start / 1000;
+    clip.plays++;
+    changed = true;
+  }
+  if (changed) paintClip();
+  return "play";
+}
+function clipTick() {
+  if (clipCheck() === "stop") return;
+  clipFrame = requestAnimationFrame(clipTick);
+}
+function clipToggle() {
+  if (!clip || !clip.model) return;
+  if (clip.state === "playing" || clip.state === "loading") {
+    ++clipAttempt;
+    cancelAnimationFrame(clipFrame);
+    clearTimeout(clipTimer);
+    clip.state = "paused";
+    player.pause();
+    return paintClip();
+  }
+  const b = clipBounds(clip.model, clip.range),
+    pos = clipNow();
+  if (clip.state === "paused" && pos >= b.start - PAD_MS && pos < b.end)
+    return playFrom(Math.max(pos, b.start));
+  clip.plays = 1;
+  playFrom(b.start);
+}
+function clipChoose(range) {
+  if (!clip || !clip.model) return;
+  clip.range = range;
+  clip.plays = 1;
+  playFrom(clipBounds(clip.model, range).start);
+}
+player.addEventListener("loadedmetadata", () => {
+  if (clip && clip.model && Number.isFinite(clip.seek) && Math.abs(clipNow() - clip.seek) > 300)
+    player.currentTime = clip.seek / 1000;
+});
+player.addEventListener("timeupdate", clipCheck);
+// Buffering shows the spinner; playing again (or the system media controls) resumes the loop.
+player.addEventListener("waiting", () => {
+  if (clip && clip.model && clip.state === "playing") {
+    clip.state = "loading";
+    paintClip();
+  }
+});
+player.addEventListener("playing", () => {
+  if (!clip || !clip.model || clip.state === "playing" || clip.state === "error") return;
+  clip.state = "playing";
+  paintClip();
+  cancelAnimationFrame(clipFrame);
+  clipFrame = requestAnimationFrame(clipTick);
+});
+player.addEventListener("pause", () => {
+  if (clip && clip.model && clip.state === "playing") {
+    cancelAnimationFrame(clipFrame);
+    clip.state = "paused";
+    paintClip();
+  }
+});
+// The episode can end inside the padding after the last line.
+player.addEventListener("ended", () => {
+  if (!clip || !clip.model) return;
+  const b = clipBounds(clip.model, clip.range);
+  if (clipLoop) {
+    clip.plays++;
+    return playFrom(b.start);
+  }
+  clip.state = "paused";
+  player.currentTime = b.start / 1000;
+  paintClip();
+});
+player.addEventListener("error", () => {
+  if (clip && clip.model && (clip.state === "loading" || clip.state === "playing")) clipFail();
+});
 function back(dest) {
   return (
     '<button data-go="' +
@@ -1455,7 +2059,22 @@ document.addEventListener("click", (e) => {
     context = active.context || "";
     failed = "";
     go("answer");
-  } else if ("again" in d) {
+  } else if ("listen" in d) openClip(visible[Number(d.listen)]);
+  else if ("clipCue" in d) clipChoose(Number(d.clipCue));
+  else if ("clipRange" in d) clipChoose(d.clipRange === "all" ? "all" : "match");
+  else if (d.clip === "toggle") clipToggle();
+  else if (d.clip === "loop") {
+    clipLoop = !clipLoop;
+    paintClip();
+  } else if (d.clip === "rate") {
+    clipRate = RATES[(RATES.indexOf(clipRate) + 1) % RATES.length];
+    write("clip-rate", clipRate);
+    player.defaultPlaybackRate = clipRate;
+    player.playbackRate = clipRate;
+    paintClip();
+  } else if (d.clip === "rough" && clip && clip.phase === "finding")
+    showClip(clip, roughModel(clip.cite), false);
+  else if ("again" in d) {
     const entry = findEntry(d.again);
     if (entry) ask(null, entry);
   } else if ("noticeClose" in d) {
@@ -1469,6 +2088,7 @@ document.addEventListener("click", (e) => {
   }
 });
 window.addEventListener("hashchange", () => {
+  if (clip) shutClip(); // the card with the player leaves the screen
   readPhoneLink();
   render();
   window.scrollTo(0, 0);

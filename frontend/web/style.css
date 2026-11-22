@@ -935,6 +935,51 @@ nav .dot {width:8px;height:8px;border-radius:50%;background:var(--purple);box-sh
 .chip-new {padding:1px 10px;border-radius:20px;background:var(--accent);color:var(--ink);font-weight:700}
 .pod-group .answer-card {max-width:none;margin-top:14px;padding:16px 0 4px;border:0;border-top:1px solid var(--line);border-radius:0}
 .more-head {display:flex;align-items:center;gap:8px;max-width:830px;margin:30px 0 0;font-size:1.1rem;color:var(--purple)}
+/* PR6 v2: the clip player under a cited card - caption lines, the quote, loop range and speed
+   (after draw-lang's ClipPlayer, in this app's purple and lime). */
+.listen {display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:4px 0 10px;font-size:.88rem;color:var(--muted)}
+.listen-btn {display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border:1px solid var(--line);border-radius:20px;background:#fff;color:var(--purple);font-weight:600;font-size:.9rem;word-break:keep-all;cursor:pointer}
+.listen-btn:hover {background:#efedf7}
+.listen-btn[aria-expanded="true"] {border-color:var(--purple);background:var(--purple);color:#fff}
+.listen-at {font-variant-numeric:tabular-nums}
+.listen-at.rough {padding:1px 9px;border:1px dashed #c9c6d5;border-radius:20px}
+.clip {display:grid;gap:12px;margin:0 0 12px;padding:14px 16px 12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 3px 14px #1f18310a}
+.clip.finding {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px}
+.clip-find {display:flex;align-items:center;gap:10px;margin:0;color:var(--purple);font-weight:600;font-size:.92rem;word-break:keep-all}
+.clip-find .spinner {flex:none;margin:0}
+.clip-now {min-height:40px;padding:6px 14px;border:1px solid var(--line);border-radius:20px;background:#fff;color:var(--muted);font-size:.86rem;word-break:keep-all}
+.clip-now:hover {background:#f4f3f8;color:var(--ink)}
+.clip-controls {display:flex;align-items:center;gap:12px}
+.clip-play {flex:none;display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:var(--purple);color:#fff}
+.clip-play:hover {background:#3b2c97}
+.clip-play svg {width:22px;height:22px}
+.clip-play .spinner {margin:0;border-color:#ffffff59;border-top-color:#fff}
+.clip-meta {display:grid;flex:1;min-width:0;line-height:1.35}
+.clip-title {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.92rem}
+.clip-at {font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.clip-rate {flex:none;min-width:50px;min-height:40px;padding:0 10px;border:1px solid var(--line);border-radius:20px;background:#fff;font-size:.86rem;font-variant-numeric:tabular-nums}
+.clip-rate:hover {background:#f4f3f8}
+.clip-bar {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.clip-loop {display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:#fff;color:var(--muted);font-size:.88rem;word-break:keep-all}
+.clip-loop[aria-pressed="true"] {border-color:transparent;background:#eeebfa;color:var(--purple)}
+.clip-loop svg {width:17px;height:17px}
+.loop-count {padding-left:6px;border-left:1px solid currentColor;font-variant-numeric:tabular-nums;opacity:.85}
+.loop-count:empty {display:none}
+.clip-seg {display:inline-flex;flex-wrap:wrap;min-width:0;padding:3px;border-radius:20px;background:#f1f3ed}
+.clip-seg button {min-height:34px;padding:0 12px;border-radius:17px;color:#536159;font-size:.85rem;word-break:keep-all}
+.clip-seg button[aria-pressed="true"] {background:#fff;color:var(--ink);box-shadow:0 1px 3px #14182819}
+.clip-note {margin:0;padding:8px 12px;border-radius:10px;background:#f6f4e6;color:#665a1c;font-size:.84rem;overflow-wrap:anywhere}
+.clip-note.error {background:#fbeeee;color:#9c3037}
+.clip-cues {display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.clip-cue {position:relative;width:100%;min-height:44px;padding:8px 12px 8px 14px;border-radius:10px;text-align:left;color:#85869a;font-weight:400;font-size:1rem;line-height:1.45;overflow-wrap:anywhere;transition:background .2s,color .2s}
+.clip-cue:hover {background:#f4f3f8}
+.clip-cue.match {color:var(--ink)}
+.clip-cue.out {opacity:.5}
+.clip-cue.active {color:var(--ink);font-weight:600;background:#f1effa}
+.clip-cue.active:before {content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--purple)}
+.clip-cue mark {padding:0 2px;border-radius:4px;background:#e6f89a;color:inherit;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+@media (max-width: 650px) {.clip {padding:12px;border-radius:16px}.clip-play {width:44px;height:44px}}
+@media(prefers-reduced-motion:reduce){.clip-cue{transition:none}}
 /* The quick translation (PR5): generated before the podcast check, so it never looks like a verified card. */
 .quick {align-self:flex-start;width:fit-content;max-width:min(600px,94%);padding:10px 16px 12px;border:1.5px dashed #b4acdc;border-radius:4px 20px 20px 20px;background:#f4f2fc;color:var(--ink);overflow-wrap:anywhere}
 .quick p {margin:0}

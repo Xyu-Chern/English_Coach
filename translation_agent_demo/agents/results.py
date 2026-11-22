@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .contracts import check_audio_fields
+
 
 class FrozenModel(BaseModel):
     """Strict, immutable and closed: unknown fields are rejected."""
@@ -41,9 +43,16 @@ class SourceCitation(FrozenModel):
     license_id: str | None
     license_url: str | None
     attribution: str | None
+    # Copied from the search hit: the publisher's audio and where this passage plays. Defaults (no audio)
+    # keep older stored results valid; audio_estimated marks an offset estimated from text position.
+    audio_url: str | None = Field(default=None, max_length=2048)
+    audio_start_ms: int | None = Field(default=None, ge=0)
+    audio_end_ms: int | None = Field(default=None, ge=0)
+    audio_estimated: bool = False
 
     @model_validator(mode="after")
     def _quote_inside_context(self):
+        check_audio_fields(self)
         start = self.quote_start_char - self.context_start_char
         end = self.quote_end_char - self.context_start_char
         if (not 0 <= self.context_start_char <= self.quote_start_char < self.quote_end_char <= self.context_end_char

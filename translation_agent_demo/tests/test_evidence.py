@@ -1,7 +1,9 @@
 """Spans shown to the model and verification of the examples it picks."""
 
+import json
 import unittest
 
+from translation_agent_demo.agents.results import SourceCitation
 from translation_agent_demo.agents.evidence import (ExampleVerifier, SpanCatalog, contains_phrase, covers, hit_summary,
                                                     key_phrase_contiguous, make_citation, matches_phrase,
                                                     normalize_for_match, normalize_phrase, quote_spans)
@@ -93,6 +95,19 @@ class EvidenceTests(unittest.TestCase):
         citation = make_citation(hit, 301, 312, "s", "a")
         self.assertEqual(citation.quote, "Quote here.")
         self.assertEqual((citation.context_start_char, citation.context_end_char), (101, 512))
+
+    def test_citation_carries_the_audio_clip_and_old_records_stay_valid(self):
+        hit = make_hit(1, "x" * 300 + " Quote here. " + "y" * 300).model_copy(update={
+            "audio_url": "https://cdn.example.org/ep.mp3", "audio_start_ms": 85_000, "audio_end_ms": 120_000,
+            "audio_estimated": True})
+        citation = make_citation(hit, 301, 312, "s", "a")
+        self.assertEqual((citation.audio_url, citation.audio_start_ms, citation.audio_end_ms, citation.audio_estimated),
+                         ("https://cdn.example.org/ep.mp3", 85_000, 120_000, True))
+        old = make_citation(make_hit(1, "Quote here."), 0, 11, "s", "a").model_dump(mode="json")
+        for name in ("audio_url", "audio_start_ms", "audio_end_ms", "audio_estimated"):
+            old.pop(name)
+        restored = SourceCitation.model_validate_json(json.dumps(old))
+        self.assertEqual((restored.audio_url, restored.audio_estimated), (None, False))
 
 
 if __name__ == "__main__":

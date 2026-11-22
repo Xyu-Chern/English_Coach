@@ -23,6 +23,19 @@ POST /api/search {question, context} answers one request:
     clients show unverified candidates with their own label); a failure after verified examples
     still returns them (they are final under the lock).
 
+GET /api/audio/alignment?chunk_id=<uuid>&quote=<the citation's quote> says where the quote plays in the
+publisher's audio (frontend/audio_align.py), with the same access rules as /api/search:
+
+    {"status":"ready"|"pending"|"unavailable","method":"asr"|"stored"|"estimated","audio_url",
+     "clip_start_ms","clip_end_ms","quote_start_ms","quote_end_ms","cues":[{"text","start_ms","end_ms"}]}
+    ready: the quote's place and the lines around it (about 30-40 s), from a saved alignment. pending: being
+    aligned; ask again in 1-2 s (about 40 s at most). unavailable: keep the citation's estimated fields.
+    pending/unavailable carry the estimate (method "estimated") when the database knows it, else nulls.
+
+After a stream's first (and final) line the server starts aligning the cited examples it sent, two at a
+time, so the answer is usually ready when the learner presses play (COACH_AUDIO_ALIGN=on, the local
+server's default; the Vercel function only reads the snapshot's saved alignments).
+
 The coach works in its own thread. The request stops it at the deadline (start + 280 s, inside
 Vercel's maxDuration of 300 s; the local server takes --deadline / COACH_DEADLINE_SECONDS) or when
 the client goes away, even before the stream's first line; its guarded dependencies then refuse the
@@ -64,7 +77,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import anyio
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
@@ -75,6 +88,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from frontend.audio_align import AudioAlignments
 from frontend.quick import QUICK_SECONDS, Quick, environment_quick
 from frontend.request_log import MAX_LIMIT, MODE_CACHE_SECONDS, MODES, ModeSwitch, RequestStore, StoreError
 from frontend.staged import CoachMode, Failed, Final, First, Guard, StagedCoach, is_terminal
@@ -256,9 +270,10 @@ class Exchange:
     sent its quick line (None without one); only a stream asks for it."""
 
     def __init__(self, stream, question: str, mode: CoachMode, record: dict, *, clock, deadline_seconds: float,
-                 release, log, quick=None, quick_seconds: float = QUICK_SECONDS, save=None):
+                 release, log, quick=None, quick_seconds: float = QUICK_SECONDS, save=None, prefetch=None):
         self.clock, self.record, self.log, self._release = clock, record, log, release
         self.save = save  # save(record, result): the database row, written by persist() after the response
+        self.prefetch = prefetch  # prefetch(chunk_ids): align the audio of the examples a stream sent (audio_align)
         self.streaming = record["transport"] == "ndjson"
         self.started = clock()
         self.deadline = self.started + deadline_seconds
@@ -334,6 +349,7 @@ class Exchange:
             if not event.pending:
                 self.record.update(status="ok", continuation=event.continuation, added_final=0, verified_final=sent,
                                    invariant_ok=True)
+            self.align_later(event.expressions)
             return FirstEvent(expressions=learner(event.expressions), pending=event.pending, note=event.note)
         if isinstance(event, Final):
             expressions, added = event.expressions, list(event.added)
@@ -348,8 +364,19 @@ class Exchange:
                     added = list(range(sent, len(expressions)))
             self.record.update(status="declined" if event.declined else "ok", continuation=event.continuation,
                                invariant_ok=event.kept_first)
+            self.align_later(expressions if self.first is None else [expressions[i] for i in added])
             return FinalEvent(expressions=learner(expressions), added=added, note=event.note)
         return self.fail("timeout" if self.guard.expired else event.code, event.continuation)
+
+    def align_later(self, items) -> None:
+        """Start aligning the audio of the cited examples a stream is sending, so that GET
+        /api/audio/alignment is usually ready when the learner presses play. Never fails the stream."""
+        if self.prefetch is None or not self.streaming:
+            return
+        try:
+            self.prefetch([i.citation.chunk_id for i in items if i.citation is not None and i.citation.audio_url])
+        except Exception:
+            pass
 
     def fail(self, code: str, continuation: str = "none") -> ErrorEvent:
         status = code if code in ("invalid_input", "timeout") else "error"
@@ -584,7 +611,7 @@ def cross_site(request: Request, origin: str) -> bool:
 def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = None, serve_ui=True,
              public_access=False, deadline_seconds: float = DEADLINE_SECONDS, quick_seconds: float = QUICK_SECONDS,
              log=None, clock=time.monotonic, store: RequestStore | None = None,
-             mode_cache_seconds: float = MODE_CACHE_SECONDS):
+             mode_cache_seconds: float = MODE_CACHE_SECONDS, alignments: AudioAlignments | None = None):
     """stream(question, mode, guard) -> events answers requests (the staged coach); answer(question) ->
     RunResult does instead, as one final answer; with neither, the local PostgreSQL index does.
 
@@ -596,9 +623,15 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
     a COACH_SEARCH_WORKERS outside 1-9 for the local index (search_workers). With
     serve_ui, so are COACH_ADMIN_DIR / COACH_ADMIN_DATA (admin_folders). store: the request log and mode
     switch (RequestStore.from_environment() in both deployments); without one nothing is written and every
-    request runs in mode.system. Its tables are ensured now; a database that is down stops nothing."""
+    request runs in mode.system. Its tables are ensured now; a database that is down stops nothing.
+
+    alignments answers GET /api/audio/alignment and aligns the audio of the examples a stream sends
+    (frontend/audio_align.py). Default: AudioAlignments.from_environment, local (COACH_AUDIO_ALIGN on unless
+    set off) with the local index, else off (saved snapshot alignments only); a wrong value stops the start."""
     mode = mode or CoachMode.from_environment()
     admin = admin_folders() if serve_ui else None
+    if alignments is None:
+        alignments = AudioAlignments.from_environment(local=stream is None and answer is None)
     if quick is None and stream is None and answer is None:
         quick = environment_quick
     stream = stream or (answering(answer) if answer is not None else partial(local_stream, workers=search_workers()))
@@ -610,7 +643,7 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     origin = os.environ.get("COACH_WEB_ORIGIN", "").strip()
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", *([origin] if origin else [])],
-                       allow_methods=["POST"], allow_headers=["Content-Type", "X-Coach-Code"],
+                       allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Coach-Code"],
                        allow_private_network=bool(origin))
     slot = threading.BoundedSemaphore(1)
     limits = SessionLimits()
@@ -650,7 +683,8 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
             return refused(429, "coach_busy", "busy")
         try:
             exchange = Exchange(stream, q, request_mode, record, clock=clock, deadline_seconds=deadline_seconds,
-                                release=slot.release, log=log, quick=quick, quick_seconds=quick_seconds, save=save)
+                                release=slot.release, log=log, quick=quick, quick_seconds=quick_seconds, save=save,
+                                prefetch=alignments.prefetch if alignments.aligning else None)
         except Exception:
             slot.release()
             return refused(503, "coach_unavailable", "error")
@@ -667,6 +701,21 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
             background.add_task(exchange.persist)
         return reply
 
+    @app.get("/api/audio/alignment")
+    def audio_alignment(request: Request, chunk_id: UUID, quote: str = Query(min_length=1, max_length=800),
+                        x_coach_code: str = Header(default="")):
+        """Where a cited quote plays (frontend/audio_align.py). The same access rules as /api/search: it may
+        start a local alignment. Answers ready | pending | unavailable; never an error for an unknown chunk."""
+        if not public_access:
+            code = os.environ.get("COACH_PAIR_CODE", "")
+            if code and not hmac.compare_digest(code.encode(), x_coach_code.encode()):
+                raise HTTPException(401, "pairing_required")
+            if not code and request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise HTTPException(403, "pairing_required")
+        if cross_site(request, origin):
+            raise HTTPException(403, "origin_denied")
+        return JSONResponse(alignments.lookup(chunk_id, quote), headers={"Cache-Control": "no-store"})
+
     serve_live_admin(app, store, switch, mode.system, origin)
 
     @app.get("/downloads/PhraseRoom.apk")
@@ -681,6 +730,7 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
     if serve_ui:
         app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
     app.state.admin = admin
+    app.state.alignments = alignments
     return app
 
 
@@ -721,6 +771,7 @@ if __name__ == "__main__":
     except ValueError as exc:  # an unknown COACH_SYSTEM or COACH_CONTINUATION, or a missing admin folder
         parser.error(str(exc))
     print(f"request log: {'on (PostgreSQL)' if request_store.enabled else 'off (no database URL)'}", flush=True)
+    print(f"audio alignment: {application.state.alignments.describe()}", flush=True)
     if args.deadline != DEADLINE_SECONDS:
         print(f"deadline: {args.deadline:g} s per request", flush=True)
     if application.state.admin:

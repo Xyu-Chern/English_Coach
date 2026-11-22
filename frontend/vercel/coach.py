@@ -20,6 +20,9 @@ WORKERS = search_workers()  # COACH_SEARCH_WORKERS, read when the function start
 
 
 class PublishedCorpus:
+    """passages.json from frontend.vercel.package; each hit carries its audio fields (audio_url, audio_start_ms,
+    audio_end_ms, audio_estimated), and an older snapshot without them reads as no audio."""
+
     def __init__(self):
         payload = json.loads((DATA / "passages.json").read_text(encoding="utf8"))
         self.profile = payload["profile"]

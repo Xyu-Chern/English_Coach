@@ -75,7 +75,7 @@ def hit_summary(hit: CorpusSearchHit, phrase: str | None) -> dict:
 
 
 def make_citation(hit: CorpusSearchHit, start: int, end: int, source_use: str, adaptation: str) -> SourceCitation:
-    """Code copies the exact quote, +-200 characters of context and the provenance."""
+    """Code copies the exact quote, +-200 characters of context, the provenance and the audio clip."""
     length = source_length(hit)
     context_start, context_end = max(0, start - 200), min(length, end + 200)
     return SourceCitation(
@@ -89,6 +89,8 @@ def make_citation(hit: CorpusSearchHit, start: int, end: int, source_use: str, a
         chunk_start_ms=hit.start_ms, chunk_end_ms=hit.end_ms, rights_status=hit.rights_status,
         rights_review_url=hit.rights_review_url, license_id=hit.license_id,
         license_url=hit.license_url, attribution=hit.attribution,
+        audio_url=hit.audio_url, audio_start_ms=hit.audio_start_ms, audio_end_ms=hit.audio_end_ms,
+        audio_estimated=hit.audio_estimated,
     )
 
 

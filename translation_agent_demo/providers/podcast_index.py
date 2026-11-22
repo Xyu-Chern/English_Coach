@@ -133,6 +133,12 @@ class PodcastIndexClient:
         if type(limit) is not int or not 1 <= limit <= maximum:
             raise ValueError(f"limit must be an integer from 1 to {maximum}.")
 
+    def episode_by_id(self, episode_id: int) -> dict[str, Any]:
+        """Fetch one episode's metadata (enclosure URL, duration) by its Podcast Index ID."""
+        if type(episode_id) is not int or episode_id <= 0:
+            raise ValueError("episode_id must be one positive integer.")
+        return self._get("/episodes/byid", {"id": episode_id}, "episode")
+
     def historical_episodes_by_feed_id(self, feed_id: int, *, limit: int = 1000) -> dict[str, Any]:
         """Request one archive page; no cursor or guarantee of complete older history.
 
@@ -192,7 +198,11 @@ class PodcastIndexClient:
         if status is not True and status != "true":
             raise PodcastIndexError("Podcast Index did not report a successful request.")
         records = payload.get(records_key)
-        if not isinstance(records, list) or len(records) > params["max"]:
+        if records_key == "episode":  # /episodes/byid returns one object, not a list.
+            if not isinstance(records, dict) or records.get("id") != params["id"]:
+                raise PodcastIndexError("Podcast Index returned an unexpected episode.")
+            records = [records]
+        if not isinstance(records, list) or len(records) > params.get("max", 1):
             raise PodcastIndexError("Podcast Index returned an invalid or oversized record list.")
         for record in records:
             if (

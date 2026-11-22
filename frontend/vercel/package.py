@@ -9,8 +9,10 @@ api/search.py  the function (frontend/vercel/index.py) with the Python files, co
 vercel.json    the function's limits and files, /admin -> /admin/ (the page reads data.json relatively), and
                X-Robots-Tag: noindex on /admin and everything under it. /admin/requests.json and /admin/mode
                (the live request log and the mode switch, frontend/request_log.py) are rewritten to the
-               function, which sees the original path. The database driver (psycopg) comes from
-               translation_agent_demo/requirements.txt.
+               function, which sees the original path, as is GET /api/audio/alignment: it answers from
+               corpus/alignments.json, the saved alignments of the snapshot's chunks (export_alignments;
+               the function never runs speech recognition, and faster-whisper stays out of its
+               requirements). The database driver (psycopg) comes from translation_agent_demo/requirements.txt.
 
 The admin data is an evaluation run's record (D5), built by frontend.admin_data from --admin-run (or
 COACH_ADMIN_RUN) under --admin-results (or COACH_ADMIN_RESULTS, default evaluation/results), in the
@@ -28,11 +30,14 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from uuid import UUID
 
 import numpy as np
 from evaluation.snapshot_store import _hit
 from frontend import admin_data
 from translation_agent_demo.providers.local_embeddings import DIRECTORY
+from translation_agent_demo.storage.episode_audio import NO_AUDIO, estimate_clip
+from translation_agent_demo.storage.retrieval import _display_url
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "frontend/.local/vercel-phrase-room"
@@ -41,9 +46,13 @@ DATA_FILES = (admin_data.DATA_FILE, admin_data.TRACES_FILE)
 FUNCTION_DIRS = ("corpus", "encoder", "translation_agent_demo", "frontend", "evaluation")
 ADMIN_PATHS = ("/admin", "/admin/(.*)")  # what vercel.json marks X-Robots-Tag: noindex
 LIVE_ADMIN_PATHS = ("/admin/requests.json", "/admin/mode")  # answered by the function (frontend/server.py)
+FUNCTION_PATHS = (*LIVE_ADMIN_PATHS, "/api/audio/alignment")  # rewritten to the function, which sees the path
+# Local-only packages: the Vercel function never runs speech recognition (COACH_AUDIO_ALIGN is off there).
+LOCAL_ONLY_REQUIREMENTS = ("-r", "anthropic==", "huggingface-hub==", "faster-whisper==")
 # The Python files the function needs beyond translation_agent_demo/ (copied whole) and its entry point.
 FUNCTION_FILES = (
     "frontend/server.py",
+    "frontend/audio_align.py",
     "frontend/staged.py",
     "frontend/quick.py",
     "frontend/request_log.py",
@@ -57,6 +66,37 @@ FUNCTION_FILES = (
 )
 
 
+def psql(sql):
+    return subprocess.check_output(
+        ["sudo", "-u", "postgres", "psql", "-XAt", "-d", "english_coach", "-c", sql],
+        text=True,
+    )
+
+
+def episode_audio():
+    """Enclosure rows (migration 010) by episode_id; empty when this database has no audio table yet."""
+    if psql("SELECT to_regclass('public.podcast_episode_audio') IS NOT NULL").strip() != "t":
+        return {}
+    output = psql("""SELECT json_build_object('episode_id',episode_id,'feed_id',feed_id,
+                'enclosure_url',enclosure_url,'duration_s',duration_s) FROM public.podcast_episode_audio""")
+    return {r["episode_id"]: r for r in map(json.loads, output.splitlines())}
+
+
+def audio_fields(chunk, document, audio):
+    """A passage's citation audio fields: stored cue timing, else character position x episode duration
+    (estimate_clip, audio_estimated=True); no known audio gives null/false."""
+    row = audio.get(chunk["episode_id"])
+    url = _display_url(row["enclosure_url"]) if row and row["feed_id"] in (None, chunk["feed_id"]) else None
+    if url is None:
+        return NO_AUDIO.as_fields()
+    lengths = [len(cue["text"]) for cue in document["cues"]]
+    spans = chunk["spans"]
+    char_start = sum(lengths[:spans[0]["cue_index"]]) + spans[0]["start_char"] if spans else None
+    char_end = sum(lengths[:spans[-1]["cue_index"]]) + spans[-1]["end_char"] if spans else None
+    return estimate_clip(url, start_ms=chunk.get("start_ms"), end_ms=chunk.get("end_ms"), char_start=char_start,
+                         char_end=char_end, char_total=sum(lengths), duration_s=row["duration_s"]).as_fields()
+
+
 def export_corpus(directory):
     sql = """SELECT json_build_object('chunk',c.record,'document',d.record,'vector',c.embedding::text,
                 'profile',m.manifest->'profile',
@@ -66,13 +106,10 @@ def export_corpus(directory):
             FROM evaluation_zh_local_v1.chunks c JOIN evaluation_zh_local_v1.documents d USING(document_id)
             CROSS JOIN evaluation_zh_local_v1.metadata m LEFT JOIN public.podcast_sources s USING(source_key)
             LEFT JOIN public.podcast_feed_reviews r ON r.feed_id=s.feed_id ORDER BY c.chunk_id"""
-    output = subprocess.check_output(
-        ["sudo", "-u", "postgres", "psql", "-XAt", "-d", "english_coach", "-c", sql],
-        text=True,
-    )
-    rows = [json.loads(line) for line in output.splitlines()]
+    rows = [json.loads(line) for line in psql(sql).splitlines()]
     if not rows or not all(r["approved"] for r in rows):
         raise ValueError("Snapshot failed source review")
+    audio = episode_audio()
     directory.mkdir(exist_ok=True)
     (directory / "passages.json").write_text(
         json.dumps(
@@ -80,6 +117,7 @@ def export_corpus(directory):
                 profile=rows[0]["profile"],
                 hits=[
                     _hit(r["chunk"], r["document"], 0).model_dump(mode="json")
+                    | audio_fields(r["chunk"], r["document"], audio)
                     for r in rows
                 ],
             ),
@@ -92,6 +130,22 @@ def export_corpus(directory):
         np.asarray([json.loads(r["vector"]) for r in rows], dtype=np.float32),
         allow_pickle=False,
     )
+
+
+def export_alignments(directory, snapshot="evaluation_zh_local_v1.chunks"):
+    """corpus/alignments.json: the saved audio alignments (migration 011, frontend/audio_align.py) of the
+    snapshot's chunks, which the function serves as GET /api/audio/alignment (it never aligns itself).
+    Precompute them first with python -m frontend.audio_align <chunk_id>...; none gives an empty file."""
+    alignments = {}
+    if psql("SELECT to_regclass('public.chunk_audio_alignment') IS NOT NULL").strip() == "t":
+        output = psql(f"""SELECT json_build_object('chunk_id',chunk_id,'audio_url',audio_url,
+                    'window_start_ms',window_start_ms,'words',words,'cues',cues,'method',method,'model',model)
+                FROM public.chunk_audio_alignment WHERE chunk_id IN (SELECT chunk_id FROM {snapshot})""")
+        for row in map(json.loads, output.splitlines()):
+            alignments[str(UUID(row.pop("chunk_id")))] = row
+    (directory / "alignments.json").write_text(json.dumps({"alignments": alignments}, ensure_ascii=False),
+                                               encoding="utf8")
+    return len(alignments)
 
 
 def stage_admin(public, *, run=None, results=None, tasks=None, systems=None, coach_system=None):
@@ -150,8 +204,9 @@ def vercel_config():
         },
         # The admin page fetches data.json relative to itself: /admin must become /admin/.
         "redirects": [{"source": "/admin", "destination": "/admin/", "permanent": False}],
-        # The live request log and the mode switch are the function's (it routes on the original path).
-        "rewrites": [{"source": source, "destination": "/api/search"} for source in LIVE_ADMIN_PATHS],
+        # The live request log, the mode switch and the audio alignments are the function's (it routes on the
+        # original path).
+        "rewrites": [{"source": source, "destination": "/api/search"} for source in FUNCTION_PATHS],
         # /admin is open to anyone with the address (D4) but kept out of search engines, its data included.
         "headers": [{"source": source, "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
                     for source in ADMIN_PATHS],
@@ -246,6 +301,7 @@ def main(argv=None):
     (target / ".vercelignore").write_text(".env*\n**/__pycache__/\n**/*.pyc\n")
     if not args.skip_search_data:
         export_corpus(target / "corpus")
+        print(f"audio alignments: {export_alignments(target / 'corpus')} saved for the snapshot's chunks")
     requirements = []
     for p in (
         demo / "requirements.txt",
@@ -255,7 +311,7 @@ def main(argv=None):
         requirements += [
             line
             for line in p.read_text().splitlines()
-            if line and not line.startswith(("-r", "anthropic==", "huggingface-hub=="))
+            if line and not line.startswith(LOCAL_ONLY_REQUIREMENTS)
         ]
     (target / "requirements.txt").write_text("\n".join(requirements) + "\n")
     (target / ".python-version").write_text("3.12\n")

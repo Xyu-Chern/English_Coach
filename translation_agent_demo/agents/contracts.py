@@ -117,12 +117,31 @@ class CorpusSearchHit(_Model):
     license_id: str | None
     license_url: str | None
     attribution: str | None = Field(description="Publisher attribution recorded with the source review; preserve when quoting.")
+    # Playback of the publisher's own audio (Podcast Index enclosure metadata; audio is never fetched or stored).
+    # Defaults mean no known audio, so older records and snapshots stay valid.
+    audio_url: str | None = Field(default=None, max_length=2048, description="Publisher audio enclosure URL, or None.")
+    audio_start_ms: int | None = Field(default=None, ge=0, description="Where playback of this passage starts.")
+    audio_end_ms: int | None = Field(default=None, ge=0)
+    audio_estimated: bool = Field(
+        default=False,
+        description="True: offsets estimated from character position x episode duration, not stored cue timing.",
+    )
 
     @model_validator(mode="after")
     def _source_boundary(self):
         if self.source_text_length is not None and self.source_text_length > len(self.text):
             raise ValueError("Source prefix cannot extend beyond the returned text.")
+        check_audio_fields(self)
         return self
+
+
+def check_audio_fields(item) -> None:
+    """Audio offsets need an audio URL, and a clip never ends before it starts."""
+    if item.audio_url is None and (item.audio_start_ms is not None or item.audio_end_ms is not None
+                                   or item.audio_estimated):
+        raise ValueError("Audio offsets require an audio URL.")
+    if None not in (item.audio_start_ms, item.audio_end_ms) and item.audio_end_ms < item.audio_start_ms:
+        raise ValueError("An audio clip cannot end before it starts.")
 
 
 class SearchCorpusResult(_Model):

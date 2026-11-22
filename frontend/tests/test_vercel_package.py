@@ -13,11 +13,12 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from uuid import UUID
 
 from frontend import admin_data
 from frontend.admin_data import AdminData, build, write
 from frontend.tests.test_admin_data import grade, pre_lock_rows, write_run
-from frontend.vercel import package
+from frontend.vercel import coach, package
 
 # Run inside the package folder: import the function entry as Vercel would, then serve public/ as static
 # files, vercel.json's redirects, and the packaged server's /api/search with a fake answer.
@@ -148,6 +149,78 @@ class VercelPackageTests(unittest.TestCase):
         self.assertEqual([200, admin_data.SCHEMA_VERSION, 8], result["data"])
         self.assertTrue(result["web"])
         self.assertEqual("Thanks for the heads-up.", result["search"]["expressions"][0]["expression"])
+
+
+AUDIO_URL = "https://audio.example/episode.mp3"
+NO_AUDIO = {"audio_url": None, "audio_start_ms": None, "audio_end_ms": None, "audio_estimated": False}
+
+
+def snapshot_row(n, episode, spans, start_ms=None, end_ms=None):
+    """One export row as psql prints it: the deploy schema (evaluation_zh_local_v1) is not on this machine."""
+    cues = [{"index": i, "text": text, "speaker": None} for i, text in enumerate(("a" * 100, "b" * 100, "c" * 200))]
+    chunk = {"chunk_id": str(UUID(int=n)), "document_id": str(UUID(int=100 + episode)), "build_id": str(UUID(int=9)),
+             "source_key": f"podcast_index:{episode}", "feed_id": 7, "episode_id": episode, "episode_title": "Episode",
+             "episode_url": None, "transcript_url": "https://feed.example/t.vtt", "language": "en",
+             "text": "Thanks for the heads-up.", "start_ms": start_ms, "end_ms": end_ms, "spans": spans}
+    document = {"cues": cues, "current_license_evidence": {"license_url": None, "attribution": "Publisher"},
+                "current_review_url": None, "license_id": "cc-by-4.0"}
+    profile = {"model": "local", "dimensions": 3, "processing_version": "v1"}
+    return {"chunk": chunk, "document": document, "vector": "[1,0,0]", "profile": profile, "approved": True}
+
+
+class SnapshotAudioTests(unittest.TestCase):
+    """passages.json carries each passage's audio fields; PublishedCorpus reads them back (PR 6)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.corpus = Path(temporary.name) / "corpus"
+        last_cue = [{"cue_index": 2, "start_char": 0, "end_char": 200}]
+        self.rows = [snapshot_row(1, 1, last_cue, 12_000, 15_000),  # stored cue timing
+                     snapshot_row(2, 1, last_cue),  # estimated from the character position
+                     snapshot_row(3, 2, last_cue),  # no audio row
+                     snapshot_row(4, 3, last_cue),  # audio row of another feed
+                     snapshot_row(5, 4, last_cue)]  # no duration: the URL without offsets
+        self.audio = [{"episode_id": 1, "feed_id": 7, "enclosure_url": AUDIO_URL, "duration_s": 400},
+                      {"episode_id": 3, "feed_id": 8, "enclosure_url": AUDIO_URL, "duration_s": 400},
+                      {"episode_id": 4, "feed_id": None, "enclosure_url": AUDIO_URL, "duration_s": None}]
+
+    def export(self, table=True):
+        def psql(sql):
+            if "to_regclass" in sql:
+                return "t\n" if table else "f\n"
+            rows = self.audio if "podcast_episode_audio" in sql else self.rows
+            return "".join(json.dumps(r) + "\n" for r in rows)
+        with patch.object(package, "psql", psql):
+            package.export_corpus(self.corpus)
+        with patch.object(coach, "DATA", self.corpus):
+            return coach.PublishedCorpus()
+
+    def clips(self, corpus):
+        return [{k: getattr(h, k) for k in NO_AUDIO} for h in corpus.hits]
+
+    def test_the_snapshot_ships_stored_or_estimated_audio_and_null_without_it(self):
+        corpus = self.export()
+        stored = {"audio_url": AUDIO_URL, "audio_start_ms": 12_000, "audio_end_ms": 15_000, "audio_estimated": False}
+        # Characters 200..400 of 400 in a 400 s episode: 200 s, started 15 s early, ended 5 s late (capped).
+        estimated = {"audio_url": AUDIO_URL, "audio_start_ms": 185_000, "audio_end_ms": 400_000,
+                     "audio_estimated": True}
+        url_only = dict(NO_AUDIO, audio_url=AUDIO_URL)
+        self.assertEqual([stored, estimated, NO_AUDIO, NO_AUDIO, url_only], self.clips(corpus))
+        found = corpus.search([1, 0, 0], limit=5, min_similarity=None, language=None, feed_ids=None,
+                              document_ids=None)
+        self.assertEqual(self.clips(corpus), [{k: getattr(h, k) for k in NO_AUDIO} for h in found])
+
+    def test_without_the_audio_table_or_in_an_older_snapshot_there_is_no_audio(self):
+        self.assertEqual([NO_AUDIO] * 5, self.clips(self.export(table=False)))
+        passages = self.corpus / "passages.json"
+        payload = json.loads(passages.read_text(encoding="utf8"))
+        for hit in payload["hits"]:
+            for key in NO_AUDIO:
+                del hit[key]
+        passages.write_text(json.dumps(payload), encoding="utf8")
+        with patch.object(coach, "DATA", self.corpus):
+            self.assertEqual([NO_AUDIO] * 5, self.clips(coach.PublishedCorpus()))
 
 
 if __name__ == "__main__":

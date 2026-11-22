@@ -201,7 +201,7 @@ The request is `{question, context}`. The default reply is one JSON object, `{ex
 | `final` | After the continuation. The only line when nothing was verified or the request was declined | `expressions` (the whole answer, sent items first), `added` (indexes of later examples), `note` |
 | `error` | In place of `final` | `code`: `timeout`, `coach_unavailable` or a coach code |
 
-- Each item keeps `expression`, `key_phrase`, `note` and `citation`.
+- Each item keeps `expression`, `key_phrase`, `note` and `citation`. A citation also carries the audio fields `audio_url`, `audio_start_ms`, `audio_end_ms` and `audio_estimated` (see **Podcast audio clips**).
 - Refusals (401, 403, 422 `invalid_input`, 429 `coach_busy`) are plain HTTP errors before any line.
 - The JSON reply is the last answer the stream would show. If the continuation fails after verified examples were found, the reply returns them with 200 (before this change: 503).
 - Work stops 280 s after the request starts (Vercel's `maxDuration` is 300 s), with the error code `timeout`. One request runs per process. If the client leaves, the work stops at its next model call or search.
@@ -281,6 +281,17 @@ In the submission run's 129 normal answers, the first stage verified all three s
 
 - `COACH_ADMIN_TOKEN` is optional. When it is set, `POST /admin/mode` needs the header `X-Admin-Token` with that value, compared with `hmac.compare_digest`. Viewing stays open (D4). When it is not set, anyone with the address can switch the mode for every learner (judgment question R2).
 
+#### Podcast audio clips (PR ⑥)
+
+A cited podcast example can play its passage from the publisher's own audio file. This plays the source record; it is not voice input or pronunciation scoring.
+
+- **Data:** migration `010_episode_audio.sql` adds `podcast_episode_audio` (`episode_id` primary key, `feed_id`, `enclosure_url`, `duration_s`, `fetched_at`). The audio backfill and the podcast sync fill it from Podcast Index enclosure metadata. Audio bytes are never downloaded or stored.
+- **Fields:** `CorpusSearchHit` and `SourceCitation` gain `audio_url` (string or `null`), `audio_start_ms` and `audio_end_ms` (integer or `null`) and `audio_estimated` (boolean). The defaults are `null` and `false`, so older records, snapshots and clients stay valid. A start or an end needs a URL, and an end never comes before its start. `search_corpus` adds the fields to each hit, and the citation copies them unchanged into the learner reply.
+- **Position:** a chunk with stored cue timing plays from its `start_ms` to its `end_ms`. Otherwise the time is interpolated between the publisher's time markers in the transcript (`transcript_time_anchors`, migration 013), starting 3 s early and ending 3 s late; only without markers is it the character position × the episode duration, 15 s early and 5 s late. Both set `audio_estimated: true`. The player asks `GET /api/audio/alignment` for the quote itself: without speech recognition it answers at once with marker-timed lines (`method: "anchored"`, `confidence`), the quote widened 3 s on each side, and the player loops that range; a speech-recognition result, when one exists or finishes, replaces it. Known gap: in a real check of 5 quotes, 2 were fully inside the loop and 2 were spoken 10–13 s earlier than estimated. If the audio table is missing or unreadable, hits come back without audio and the search still succeeds.
+- **App:** a card with a citation and an `audio_url` shows **听这一段 / 이 부분 듣기**. One shared player seeks to the start and stops at the end (or 20 s after the start). An estimated start is labelled **大致位置 / 대략 위치**. Cards without a verified record show no player, so generated suggestions stay distinct from retrieved records.
+- **Licence:** the app plays the publisher's file from its original URL. It does not download, cache or redistribute audio. The transcript licence recorded in the feed review does not cover the audio, which stays under the publisher's own terms.
+- **Status (local database, 2026-11-22):** 1,460 of 1,460 transcript episodes have an audio URL and a duration (7,514 rows, counting other episodes of the same feeds). Of 43,590 chunks, 5,937 (13.6%) have stored timing and 37,653 (86.4%) are estimated. None of the 36,397 embedded (searchable) chunks has stored timing, so every current search hit is estimated. 16 sampled URLs on 6 hosts answered HEAD with 200 and a Range request with 206. In a browser check with real search results (a fake coach, no model call), two estimated clips played from the publishers' files.
+
 #### Known gaps
 
 - Not yet checked on a real deployment or device: line-by-line streaming through Vercel and the Android WebView, idle timeouts during a quiet continuation (there is no ping line), and the `/admin` redirect.
@@ -293,6 +304,8 @@ In the submission run's 129 normal answers, the first stage verified all three s
 - The admin page's JavaScript has no automated test; server tests cover how it is served and its source rules.
 - The app's default agent is the locked agent that D6 measured: equal to the baseline on pass, not better as the pre-lock submission agent was (judgment question R1).
 - The quick translation adds one model call to each streamed request. Its latency and the gain from parallel searches were measured locally with Claude Haiku 5.5 only (Faster first answer); the deployed model is not measured. `first` still takes about 16 s.
+- An estimated clip covers the whole chunk (median about 160 s over 50 searchable chunks), not the quoted sentence, so the quote can come well after the start (judgment question R4).
+- The deployed snapshot has no audio until the packaging database (WSL) applies migration 010 and runs the audio backfill. The live site was not redeployed. Enclosure URLs often pass through tracking redirects and can change; no job re-checks them.
 
 ## 11. Project Owner Judgment Questions
 
@@ -301,6 +314,8 @@ In the submission run's 129 normal answers, the first stage verified all three s
 **R2. Admin token on Vercel:** set `COACH_ADMIN_TOKEN`? Without it, anyone who opens `/admin` can switch the live mode for every learner. Recommended: yes; viewing stays open (D4), and only the switch needs the token.
 
 **R3. How long to keep saved questions:** rows in Neon stay until deleted. Recommended: keep them until grading ends, then delete the rows or the Neon project. Alternative: keep them as portfolio evidence, knowing every question stays public on `/admin`.
+
+**R4. Also narrow the citation's own audio fields to the quoted sentence?** The player already loops the quote (marker-timed answer from `GET /api/audio/alignment`); the citation's `audio_start_ms`/`audio_end_ms` still cover the whole chunk (3 s early with markers, 15 s without). Recommended: keep them chunk-level, because narrowing them changes `agents/` code and evaluation manifests made before the change would refuse to resume. Alternative: add the quote's estimate to the citation.
 
 **Owner action (not a question):** attach Neon in the Vercel dashboard (steps in `frontend/README.md`). Until then the deployment keeps only the stdout line, and `/admin` cannot switch the mode.
 
@@ -513,7 +528,7 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 | `final` | 后续阶段结束后。没有核对通过的例句或请求被拒绝时，只有这一行 | `expressions`（完整答案，已发送条目在前）、`added`（后来找到的例句序号）、`note` |
 | `error` | 代替 `final` | `code`：`timeout`、`coach_unavailable` 或教练错误码 |
 
-- 每个条目保留 `expression`、`key_phrase`、`note` 和 `citation`。
+- 每个条目保留 `expression`、`key_phrase`、`note` 和 `citation`。`citation` 还带有音频字段 `audio_url`、`audio_start_ms`、`audio_end_ms` 和 `audio_estimated`（见 **播客音频片段**）。
 - 拒绝（401、403、422 `invalid_input`、429 `coach_busy`）是普通 HTTP 错误，在任何行之前返回。
 - JSON 回复就是流最终会显示的答案。已找到核对通过的例句后，即使后续阶段失败，回复也会以 200 返回这些例句（此前为 503）。
 - 请求开始 280 秒后停止工作（Vercel 的 `maxDuration` 为 300 秒），错误码为 `timeout`。每个进程同时只处理一个请求。客户端离开后，工作会在下一次模型调用或检索前停止。
@@ -593,6 +608,17 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 
 - `COACH_ADMIN_TOKEN` 是可选的。设置后，`POST /admin/mode` 需要带上值相同的 `X-Admin-Token` 请求头，用 `hmac.compare_digest` 比较。查看仍然公开（D4）。不设置时，知道网址的人都能为所有学习者切换模式（判断题 R2）。
 
+#### 播客音频片段（PR ⑥）
+
+带出处的播客例句可以直接播放发布者原音频中的对应段落。这是播放出处记录，不是语音输入，也不是发音评分。
+
+- **数据：** 迁移 `010_episode_audio.sql` 新增 `podcast_episode_audio`（主键 `episode_id`，以及 `feed_id`、`enclosure_url`、`duration_s`、`fetched_at`）。音频回填任务和播客同步根据 Podcast Index 的 enclosure 元数据填写。从不下载或保存音频内容。
+- **字段：** `CorpusSearchHit` 和 `SourceCitation` 新增 `audio_url`（字符串或 `null`）、`audio_start_ms` 和 `audio_end_ms`（整数或 `null`）以及 `audio_estimated`（布尔值）。默认值为 `null` 和 `false`，所以旧记录、快照和旧客户端仍然有效。有起点或终点就必须有 URL，终点不能早于起点。`search_corpus` 为每条结果加上这些字段，`citation` 原样复制到学习者的回答中。
+- **位置：** 有字幕时间的片段从它的 `start_ms` 播放到 `end_ms`。否则按文字稿里发布方的时间标记（`transcript_time_anchors`，迁移 013）插值，提前 3 秒开始、延后 3 秒结束；只有没有时间标记时才用字符位置比例 × 节目时长，提前 15 秒、延后 5 秒。两种都标记 `audio_estimated: true`。播放器会用 `GET /api/audio/alignment` 查询引用句本身：没有语音识别时立即返回按时间标记计时的字幕行（`method: "anchored"`、`confidence`），引用句前后各放宽 3 秒，播放器循环这一段；已有或刚完成的语音识别结果会替换它。已知差距：真实检查 5 条引用时，2 条完整落在循环范围内，2 条实际比估计早 10–13 秒。音频表缺失或读不出时，结果不带音频，搜索本身照常成功。
+- **应用：** 有出处且有 `audio_url` 的卡片显示 **听这一段 / 이 부분 듣기**。一个共用播放器跳到起点，到终点（或起点后 20 秒）停止。估算的起点标为 **大致位置 / 대략 위치**。没有核实记录的卡片不显示播放器，因此生成的建议与检索到的记录仍然分得清。
+- **许可：** 应用从原始 URL 播放发布者的文件，不下载、不缓存、不再分发音频。节目审核中记录的字幕许可不涵盖音频，音频仍受发布者自己的条款约束。
+- **现状（本地数据库，2026-11-22）：** 有字幕的 1,460 集节目全部有音频 URL 和时长（共 7,514 行，含同一节目源的其他集）。43,590 个片段中，5,937 个（13.6%）有字幕时间，37,653 个（86.4%）是估算。36,397 个已向量化（可搜索）的片段都没有字幕时间，所以目前所有搜索结果都是估算位置。抽查 6 个主机上的 16 个 URL，HEAD 均返回 200，Range 请求均返回 206。用真实搜索结果（假教练，不调用模型）在浏览器中检查，两个估算片段都能从发布者文件播放。
+
 #### 已知差距
 
 - 尚未在真实部署或设备上检查：经过 Vercel 和 Android WebView 时是否逐行传输，后续阶段长时间无输出时的空闲超时（没有 ping 行），以及 `/admin` 重定向。
@@ -605,6 +631,8 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 - 管理页的 JavaScript 没有自动化测试；服务端测试覆盖页面的提供方式和源码规则。
 - 应用默认的 agent 是 D6 评估过的加锁 agent：通过率与 baseline 相同，不像加锁前的提交 agent 那样更好（判断题 R1）。
 - 快速翻译使每个流式请求多一次模型调用。它的延迟和并行检索带来的改善只在本地用 Claude Haiku 5.5 测量过（更快看到第一个回答）；部署所用的模型没有测量。`first` 仍需约 16 秒。
+- 估算的音频片段覆盖整个片段（50 个可搜索片段的中位数约 160 秒），而不是被引用的那句话，所以引用句可能在起点之后很久才出现（判断题 R4）。
+- 打包用的数据库（WSL）应用迁移 010 并运行音频回填之前，部署的快照没有音频。线上站点没有重新部署。enclosure URL 常经过统计跳转，可能变化，目前没有定期复查的任务。
 
 ## 11. 项目负责人判断题
 
@@ -613,6 +641,8 @@ Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口�
 **R2. Vercel 上的管理令牌：** 是否设置 `COACH_ADMIN_TOKEN`？不设置时，任何打开 `/admin` 的人都能为所有学习者切换线上模式。建议：设置；查看仍然公开（D4），只有切换需要令牌。
 
 **R3. 已保存问题的保留期限：** Neon 中的行会一直保留，直到被删除。建议：保留到评分结束，然后删除这些行或整个 Neon 项目。其他选项：作为作品集证据保留，但要接受所有问题都会在 `/admin` 上持续公开。
+
+**R4. 是否把出处自身的音频字段也缩小到被引用的那句话？** 播放器已经循环引用句（`GET /api/audio/alignment` 按时间标记计时的回答）；出处的 `audio_start_ms`/`audio_end_ms` 仍覆盖整个片段（有时间标记时提前 3 秒，没有时提前 15 秒）。建议：保持按片段，因为缩小它们会修改 `agents/` 代码，修改前生成的评估清单将拒绝续跑。其他选项：把引用句的估算时间加入出处。
 
 **项目负责人操作（不是判断题）：** 在 Vercel 控制台接入 Neon（步骤见 `frontend/README.md`）。在此之前，部署只保留 stdout 日志行，`/admin` 也不能切换模式。
 
@@ -825,7 +855,7 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 | `final` | 후속 단계가 끝난 뒤. 검증된 예문이 없거나 요청이 거절되면 이 줄만 온다 | `expressions`(전체 답, 보낸 항목이 앞), `added`(나중에 찾은 예문의 번호), `note` |
 | `error` | `final` 대신 | `code`: `timeout`, `coach_unavailable` 또는 코치 오류 코드 |
 
-- 각 항목의 키는 `expression`, `key_phrase`, `note`, `citation`으로 기존과 같다.
+- 각 항목의 키는 `expression`, `key_phrase`, `note`, `citation`으로 기존과 같다. `citation`에는 음성 필드 `audio_url`, `audio_start_ms`, `audio_end_ms`, `audio_estimated`도 실린다(**팟캐스트 음성 구간** 참고).
 - 거절(401, 403, 422 `invalid_input`, 429 `coach_busy`)은 일반 HTTP 오류이며 어떤 줄보다 먼저 온다.
 - JSON 응답은 스트림이 마지막에 보여 줄 답과 같다. 검증된 예문을 찾은 뒤 후속 단계가 실패하면 그 예문을 200으로 돌려준다(이번 변경 전에는 503).
 - 작업은 요청 시작 280초 뒤에 오류 코드 `timeout`으로 멈춘다(Vercel의 `maxDuration`은 300초). 프로세스당 요청 하나만 처리한다. 클라이언트가 떠나면 작업은 다음 모델 호출이나 검색 전에 멈춘다.
@@ -905,6 +935,17 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 
 - `COACH_ADMIN_TOKEN`은 선택 사항이다. 설정하면 `POST /admin/mode`에 같은 값의 `X-Admin-Token` 헤더가 필요하고, `hmac.compare_digest`로 비교한다. 보기는 계속 공개다(D4). 설정하지 않으면 주소를 아는 사람은 누구나 모든 학습자의 모드를 바꿀 수 있다(판단 질문 R2).
 
+#### 팟캐스트 음성 구간(PR ⑥)
+
+출처가 있는 팟캐스트 예문은 게시자의 원본 음성 파일에서 해당 구간을 바로 재생할 수 있다. 출처 기록을 재생하는 기능이며, 음성 입력이나 발음 채점이 아니다.
+
+- **데이터:** 마이그레이션 `010_episode_audio.sql`이 `podcast_episode_audio`(기본 키 `episode_id`, `feed_id`, `enclosure_url`, `duration_s`, `fetched_at`)를 추가한다. 음성 백필 작업과 팟캐스트 동기화가 Podcast Index의 enclosure 메타데이터로 채운다. 음성 파일 자체는 내려받거나 저장하지 않는다.
+- **필드:** `CorpusSearchHit`와 `SourceCitation`에 `audio_url`(문자열 또는 `null`), `audio_start_ms`와 `audio_end_ms`(정수 또는 `null`), `audio_estimated`(불리언)가 추가된다. 기본값이 `null`과 `false`라서 기존 기록, 스냅샷, 구 클라이언트는 그대로 유효하다. 시작이나 끝이 있으면 URL이 있어야 하고, 끝은 시작보다 앞일 수 없다. `search_corpus`가 각 결과에 필드를 붙이고, `citation`이 학습자 응답에 그대로 옮긴다.
+- **위치:** 대본 시각이 저장된 청크는 그 `start_ms`부터 `end_ms`까지 재생한다. 없으면 대본 안 게시자 시간 표시(`transcript_time_anchors`, 마이그레이션 013) 사이를 보간하고 3초 일찍 시작해 3초 늦게 끝낸다. 시간 표시가 없을 때만 문자 위치 비율 × 에피소드 길이를 쓰고 15초 일찍 시작해 5초 늦게 끝낸다. 둘 다 `audio_estimated: true`다. 플레이어는 `GET /api/audio/alignment`로 인용 문장 자체의 위치를 묻는다. 음성 인식이 없으면 시간 표시로 맞춘 자막 줄(`method: "anchored"`, `confidence`)을 바로 돌려주고 인용 앞뒤를 3초씩 넓히며, 플레이어는 그 구간을 반복한다. 음성 인식 결과가 있거나 끝나면 그 값으로 바꾼다. 알려진 차이: 실제 인용 5개를 확인했을 때 2개는 반복 구간 안에 완전히 들어갔고 2개는 추정보다 10–13초 일찍 말해졌다. 음성 테이블이 없거나 읽을 수 없으면 결과는 음성 없이 돌아오고 검색 자체는 성공한다.
+- **앱:** 출처와 `audio_url`이 있는 카드에 **听这一段 / 이 부분 듣기**가 보인다. 공유 플레이어 하나가 시작 위치로 이동하고 끝(없으면 시작 후 20초)에서 멈춘다. 추정한 시작은 **大致位置 / 대략 위치**로 표시한다. 검증된 기록이 없는 카드에는 플레이어가 없어서, 생성된 제안과 검색된 기록이 계속 구분된다.
+- **라이선스:** 앱은 게시자의 파일을 원래 URL에서 재생한다. 음성을 내려받거나 캐시하거나 재배포하지 않는다. 피드 검토에 기록된 대본 라이선스는 음성에 적용되지 않으며, 음성은 게시자의 조건을 따른다.
+- **현황(로컬 DB, 2026-11-22):** 대본이 있는 에피소드 1,460개 모두에 음성 URL과 길이가 있다(같은 피드의 다른 에피소드까지 7,514행). 청크 43,590개 중 5,937개(13.6%)는 저장된 시각이 있고 37,653개(86.4%)는 추정이다. 임베딩된(검색 가능한) 청크 36,397개에는 저장된 시각이 하나도 없어서, 지금 검색 결과는 모두 추정 위치다. 호스트 6곳의 URL 16개를 표본으로 확인했고 HEAD는 모두 200, Range 요청은 모두 206이었다. 실제 검색 결과(가짜 코치, 모델 호출 없음)로 브라우저에서 확인했을 때 추정 구간 두 개가 게시자 파일에서 재생됐다.
+
 #### 알려진 차이
 
 - 실제 배포나 기기에서 아직 확인하지 않은 것: Vercel과 Android WebView를 거칠 때 줄 단위로 바로 전달되는지, 후속 단계가 오래 조용할 때의 유휴 타임아웃(ping 줄 없음), `/admin` 이동.
@@ -917,6 +958,8 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 - 어드민 화면의 JavaScript에는 자동 테스트가 없다. 서버 테스트는 화면을 제공하는 방식과 소스 규칙을 확인한다.
 - 앱의 기본 agent는 D6에서 측정한 잠금 agent다. 통과율은 baseline과 같고, 잠금 전 제출 agent처럼 더 낫지는 않다(판단 질문 R1).
 - 빠른 번역은 스트리밍 요청마다 모델 호출을 하나 더한다. 그 대기 시간과 병렬 검색으로 줄어든 시간은 로컬에서 Claude Haiku 5.5로만 측정했다(첫 답 더 빨리 보기). 배포 모델은 측정하지 않았다. `first`는 여전히 약 16초 걸린다.
+- 추정 음성 구간은 인용 문장이 아니라 청크 전체를 덮는다(검색 가능한 청크 50개의 중앙값 약 160초). 그래서 인용 문장이 시작 후 한참 뒤에 나올 수 있다(판단 질문 R4).
+- 패키징 DB(WSL)에 마이그레이션 010을 적용하고 음성 백필을 돌리기 전에는 배포 스냅샷에 음성이 없다. 라이브 사이트는 다시 배포하지 않았다. enclosure URL은 통계용 리디렉트를 거치는 경우가 많아 바뀔 수 있는데, 다시 확인하는 작업은 없다.
 
 ## 11. 프로젝트 책임자 판단 질문
 
@@ -925,6 +968,8 @@ Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코�
 **R2. Vercel의 어드민 토큰:** `COACH_ADMIN_TOKEN`을 설정할까요? 없으면 `/admin`을 연 사람 누구나 모든 학습자의 실제 모드를 바꿀 수 있습니다. 추천: 설정. 보기는 계속 공개이고(D4) 전환에만 토큰이 필요합니다.
 
 **R3. 저장된 질문의 보관 기간:** Neon의 행은 지울 때까지 남습니다. 추천: 채점이 끝날 때까지 두고, 그 뒤 행이나 Neon 프로젝트를 지웁니다. 다른 선택지: 포트폴리오 근거로 남기되, 모든 질문이 `/admin`에 계속 공개된다는 점을 받아들입니다.
+
+**R4. citation 자체의 음성 필드도 인용 문장으로 좁힐까요?** 플레이어는 이미 인용 구간을 반복합니다(`GET /api/audio/alignment`가 시간 표시로 맞춘 답). citation의 `audio_start_ms`/`audio_end_ms`는 여전히 청크 전체를 가리킵니다(시간 표시가 있으면 3초, 없으면 15초 일찍). 추천: 청크 단위로 유지합니다. 좁히면 `agents/` 코드가 바뀌고 변경 전에 만든 평가 매니페스트는 이어서 실행되지 않습니다. 다른 선택지: 인용 문장의 추정 시각을 citation에 추가하기.
 
 **책임자 작업(질문 아님):** Vercel 대시보드에서 Neon을 연결합니다(절차는 `frontend/README.md`). 그전까지 배포는 stdout 로그 줄만 남기고, `/admin`은 모드를 바꿀 수 없습니다.
 
