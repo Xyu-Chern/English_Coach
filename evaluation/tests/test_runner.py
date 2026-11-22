@@ -11,7 +11,7 @@ from unittest import mock
 from evaluation import runner
 from evaluation.runner import ROOT, SYSTEMS, UNIT_TRIES, Runner, PairAttempt, RunPlan, git_state
 from evaluation.tasks import load_tasks
-from evaluation.tests.offline import OfflineChat, OfflineEnvironment
+from evaluation.tests.offline import OfflineChat, OfflineEnvironment, submission_agent
 
 PRICING = json.loads((ROOT / "evaluation/data/pricing.json").read_text())
 
@@ -52,6 +52,11 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(RunPlan([]).repeats, 3)
         self.assertIn("evaluation/data/tasks.jsonl", SOURCES)
         self.assertEqual(sorted(source_hashes()), SOURCES)  # every source exists
+        # the coach's subpackages too: a change to the agent, its lock or its prompt changes the manifest
+        self.assertLessEqual({"translation_agent_demo/agents/systems/agent.py",
+                              "translation_agent_demo/agents/systems/base.py",
+                              "translation_agent_demo/agents/prompts/agent.py",
+                              "translation_agent_demo/agents/schemas/agent.py"}, set(SOURCES))
 
     def test_resume_runs_each_unit_once_with_a_row_per_system(self):
         self.assertEqual(Runner(self.plan, self.run_dir, pair(), {"v": 1}).run(max_new=2)["agent/ok"], 2)
@@ -159,7 +164,8 @@ class PairAttemptTests(unittest.TestCase):
         self.tasks = {t.id: t for t in load_tasks()}
 
     def test_the_prefix_is_recorded_once_per_unit_and_counted_in_both_systems(self):
-        outcome = PairAttempt(OfflineEnvironment(), PRICING)(self.tasks["ko-usage-con-1"])
+        with submission_agent():  # the submitted evaluation's agent: its review turn runs on three verified examples
+            outcome = PairAttempt(OfflineEnvironment(), PRICING)(self.tasks["ko-usage-con-1"])
         self.assertEqual(tuple(outcome), SYSTEMS)
         for result, cost in outcome.values():
             shared = [e for e in result["model_events"] if e.get("shared")]

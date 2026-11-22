@@ -7,7 +7,9 @@
       search_r_k          one search per other replacement (at most 3)
       select_{r+1}        one call picks examples for them; code verifies
       validate_select_{r+1}
-    it stops early only when a revision offers nothing new. Verified slots are never touched.
+    it stops early only when a revision offers nothing new. Verified slots are never touched, so the
+    baseline always keeps the verified-slot lock; when the first stage verified every slot it does not
+    run at all (base.py skips it before the first round).
 """
 
 from ..draft import Draft

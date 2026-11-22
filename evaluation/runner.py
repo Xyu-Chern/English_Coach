@@ -51,7 +51,8 @@ from .tasks import EvalTask
 ROOT = Path(__file__).resolve().parent.parent
 SYSTEMS = tuple(CODE_SYSTEMS)  # ("baseline", "agent"), in the order results are reported
 # Every file that can change an answer or its cost; a run refuses to resume if any of them changed.
-SOURCES = sorted([*(str(p.relative_to(ROOT)) for p in (ROOT / "translation_agent_demo/agents").glob("*.py")),
+# The coach's modules are listed recursively: its systems, tools, prompts and schemas live in subpackages.
+SOURCES = sorted([*(str(p.relative_to(ROOT)) for p in (ROOT / "translation_agent_demo/agents").rglob("*.py")),
                   *(f"evaluation/{name}.py" for name in ("runner", "live", "snapshot_search", "snapshot_store",
                                                          "recording", "freeze", "tasks", "costs")),
                   "evaluation/data/tasks.jsonl", "evaluation/data/pricing.json", "translation_agent_demo/config.py",

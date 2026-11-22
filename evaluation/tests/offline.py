@@ -16,7 +16,13 @@ Five tasks have authored scenarios:
     ko-unans-source_other_show  declined: source not in the corpus
     ko-unans-injection          declined: out of scope
 
+The agent parts above describe the agent of the submitted evaluation (submission_agent(),
+AgentPipeline(locked=False)). The registered agent keeps the verified-slot lock: in the first two
+scenarios the first stage verifies every slot, so it ends there like the baseline; in the third it
+still re-picks the rejected slot.
+
     dry_run(results_dir, repeats=1) -> the run directory, with attempts, grades, report and review.html
+    dry_run(results_dir, locked=False) -> the same with the submission agent
 """
 
 import hashlib
@@ -24,11 +30,12 @@ import io
 import json
 import os
 import re
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 from uuid import UUID
 
+from translation_agent_demo.agents import SYSTEMS as CODE_SYSTEMS, AgentPipeline
 from translation_agent_demo.agents.contracts import ChatCompletion, CorpusSearchHit, ModelUsage
 from translation_agent_demo.agents.evidence import SHOW_FEEDS
 from translation_agent_demo.providers.embedding_protocol import EmbeddingBatch
@@ -410,14 +417,23 @@ class OfflineEnvironment:
         yield OfflineStore()
 
 
-def dry_run(results: Path, *, run: str = "dryrun", repeats: int = 1, workers: int = 2) -> Path:
-    """run, grade, report and review through evaluation.eval, offline; returns the run directory."""
+@contextmanager
+def submission_agent():
+    """Run the submitted evaluation's agent (AgentPipeline(locked=False)) as "agent" instead of the locked one."""
+    with patch.dict(CODE_SYSTEMS, {"agent": AgentPipeline(locked=False)}):
+        yield
+
+
+def dry_run(results: Path, *, run: str = "dryrun", repeats: int = 1, workers: int = 2, locked: bool = True) -> Path:
+    """run, grade, report and review through evaluation.eval, offline; returns the run directory.
+
+    locked=False runs the submission agent (submission_agent()) in place of the registered, locked one."""
     from evaluation import eval as cli
 
     run_dir = Path(results) / run
     tasks = [t for t in load_tasks() if t.id in SCENARIOS]
     with patch.dict(os.environ, {"LLM_MODEL": CHAT_MODEL}), patch("evaluation.judging.Judge", OfflineJudge), \
-            redirect_stdout(io.StringIO()):
+            (nullcontext() if locked else submission_agent()), redirect_stdout(io.StringIO()):
         cli.run(run_dir, tasks, repeats=repeats, workers=workers, max_new=None, prepare_only=False,
                 environment=OfflineEnvironment())
         cli.grade(run_dir, 4, False, corpus=OfflineCorpus())

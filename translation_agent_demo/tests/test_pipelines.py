@@ -2,9 +2,12 @@
 
 import time
 import unittest
+from unittest.mock import patch
 
-from translation_agent_demo.agents import CoachDependencies, ExpressionCoach, answer_pair, prompts, system_for
+from translation_agent_demo.agents import (SYSTEMS, AgentPipeline, BaselinePipeline, CoachDependencies,
+                                           ExpressionCoach, answer_pair, prompts, system_for)
 from translation_agent_demo.agents.evidence import SHOW_FEEDS
+from translation_agent_demo.agents.prompts.agent import _LOCKED
 from translation_agent_demo.agents.systems.base import CONTINUATION_BUDGET
 from translation_agent_demo.agents.systems.first_stage import DECLINE_NOTES, FIRST_STAGE_BUDGET, run_first_stage
 from translation_agent_demo.agents.session import Budget, RequestSession
@@ -77,12 +80,24 @@ def searches(*texts, feed_id=SHOW_FEEDS["go_time"], corpus_count=None):
                             for i, text in enumerate(texts)))
 
 
+# The agent of the submitted evaluation, without the verified-slot lock. The tests written before the
+# lock pin its behaviour, so run_systems uses it unless locked=True; LockTests run the default agent.
+SUBMISSION_AGENT = AgentPipeline(locked=False)
+
+
 def run_systems(selection=None, *, replies=None, texts=None, first=None, clock=None, concurrent=False,
-             corpus_count=None):
+             corpus_count=None, locked=False):
     """Both systems on QUESTION; returns (results, {system: (model, search)}, prefix model, prefix search).
 
     The agent given no replies gets one finishing turn; the baseline given none ends with
-    model_unavailable once it needs a call, which no test here checks."""
+    model_unavailable once it needs a call, which no test here checks. locked=False runs the
+    submission agent (SUBMISSION_AGENT) as "agent"; locked=True the registered, locked one."""
+    with patch.dict(SYSTEMS, {} if locked else {"agent": SUBMISSION_AGENT}):
+        return _run_systems(selection, replies=replies, texts=texts, first=first, clock=clock, concurrent=concurrent,
+                            corpus_count=corpus_count)
+
+
+def _run_systems(selection, *, replies, texts, first, clock, concurrent, corpus_count):
     replies, texts = replies or {}, texts or {}
     prefix_search = searches(*TEXTS, corpus_count=corpus_count)
     first = first if isinstance(first, list) else [first or candidates()]
@@ -156,13 +171,15 @@ class SystemTests(unittest.TestCase):
             return decision(*(search_action(f"query {turn}{i}", None) for i in range(4)), finish=False)
 
         final = {"assessment": "Last pick.", "actions": []}
-        results, _, _, _ = run_systems({"picks": []}, texts={name: ["Unrelated."] * 9 for name in NAMES},
-                                    replies={"baseline": [r for n in (1, 2, 3) for r in rounds(n)],
-                                             "agent": [busy(1), busy(2), busy(3), final]})
-        for name, calls in (("baseline", 6), ("agent", 4)):
-            r = results[name]
-            self.assertEqual((r.status, r.model_rounds - 2, len(r.tool_calls) - 6), ("ok", calls, 9), name)
-            self.assertLessEqual(calls, CONTINUATION_BUDGET.model_calls)
+        for locked in (False, True):  # the submission agent and the locked default agent
+            results, _, _, _ = run_systems({"picks": []}, texts={name: ["Unrelated."] * 9 for name in NAMES},
+                                        replies={"baseline": [r for n in (1, 2, 3) for r in rounds(n)],
+                                                 "agent": [busy(1), busy(2), busy(3), final]}, locked=locked)
+            for name, calls in (("baseline", 6), ("agent", 4)):
+                with self.subTest(locked=locked, system=name):
+                    r = results[name]
+                    self.assertEqual((r.status, r.model_rounds - 2, len(r.tool_calls) - 6), ("ok", calls, 9))
+                    self.assertLessEqual(calls, CONTINUATION_BUDGET.model_calls)
 
     def test_a_spent_budget_assembles_what_exists_instead_of_failing(self):
         deps = CoachDependencies(ScriptedModel(candidates(), TWO_VERIFIED), searches(*TEXTS))
@@ -193,7 +210,7 @@ class SystemTests(unittest.TestCase):
         model = ScriptedModel(candidates(source_show="js_party"), THREE_VERIFIED,
                               decision(search_action("Shall we pause here?", "pause here"), finish=False),
                               decision())
-        ExpressionCoach(CoachDependencies(model, search), "agent").answer(QUESTION)
+        ExpressionCoach(CoachDependencies(model, search), SUBMISSION_AGENT).answer(QUESTION)
         self.assertEqual([a.feed_ids for a in search.args], [[SHOW_FEEDS["js_party"]]] * 7)
 
 
@@ -329,17 +346,22 @@ class AgentTests(unittest.TestCase):
             return decision(*(search_action(f"query {turn}{i}", None) for i in range(4)), finish=False)
 
         final = {"assessment": "Last pick.", "actions": [repick(0, "a3k1h1s1", "Let's table this")]}
-        results, systems, _, _ = run_systems({"picks": []}, replies={"agent": [busy(1), busy(2), busy(3), final]},
-                                          texts={"agent": ["Unrelated."] * 8 + ["Let's table this one."]})
-        agent, model = results["agent"], systems["agent"][0]
-        self.assertEqual((agent.model_rounds, len(agent.tool_calls)), (2 + 4, 6 + 9))
-        self.assertEqual(stages(agent)[-4:], ["pick_final", "repick_final_1", "validate_pick_final", "assemble"])
-        self.assertEqual([s.details["skipped"] for s in agent.trace if "skipped" in s.details],
-                         ["no_searches_left"] * 3)
-        self.assertEqual([p["remaining"]["pick_call_follows_if_you_search"] for p in payloads(systems, "agent")],
-                         [False, False, True, False])
-        self.assertEqual(model.formats[-1]["json_schema"]["name"], "FinalPick")
-        self.assertEqual(shown(agent)[0], (CANDIDATES[0][0], True))
+        for locked, prompt in ((False, prompts.AGENT_PROMPT), (True, prompts.AGENT_LOCKED_PROMPT)):
+            with self.subTest(locked=locked):  # nothing verified first, so nothing is locked either way
+                results, systems, _, _ = run_systems(
+                    {"picks": []}, replies={"agent": [busy(1), busy(2), busy(3), final]},
+                    texts={"agent": ["Unrelated."] * 8 + ["Let's table this one."]}, locked=locked)
+                agent, model = results["agent"], systems["agent"][0]
+                self.assertEqual((agent.model_rounds, len(agent.tool_calls)), (2 + 4, 6 + 9))
+                self.assertEqual(stages(agent)[-4:], ["pick_final", "repick_final_1", "validate_pick_final",
+                                                      "assemble"])
+                self.assertEqual([s.details["skipped"] for s in agent.trace if "skipped" in s.details],
+                                 ["no_searches_left"] * 3)
+                self.assertEqual([p["remaining"]["pick_call_follows_if_you_search"]
+                                  for p in payloads(systems, "agent")], [False, False, True, False])
+                self.assertEqual([p[0] for p in model.prompts], [prompt] * 4)
+                self.assertEqual(model.formats[-1]["json_schema"]["name"], "FinalPick")
+                self.assertEqual(shown(agent)[0], (CANDIDATES[0][0], True))
 
     def test_a_finishing_turn_runs_no_search(self):
         finishing = decision(search_action("more", "more"))
@@ -390,23 +412,178 @@ class GuardTests(unittest.TestCase):
 
     def test_a_repick_may_carry_a_variant_expression(self):
         turn = decision(repick(2, "c3h1s1", "We should revisit it", "We should revisit it.", "revisit it"))
-        agent = run_systems(TWO_VERIFIED, replies={"agent": [turn]})[0]["agent"]
-        self.assertEqual(step(agent, "repick_1_1").details["outcome"], "verified")
-        self.assertEqual((agent.expressions[2].expression, agent.expressions[2].key_phrase),
-                         ("We should revisit it.", "revisit it"))
+        for locked in (False, True):  # slot 2 had no example, so the lock leaves it to the agent
+            with self.subTest(locked=locked):
+                agent = run_systems(TWO_VERIFIED, replies={"agent": [turn]}, locked=locked)[0]["agent"]
+                self.assertEqual(step(agent, "repick_1_1").details["outcome"], "verified")
+                self.assertEqual((agent.expressions[2].expression, agent.expressions[2].key_phrase),
+                                 ("We should revisit it.", "revisit it"))
 
     def test_noops_are_recorded_not_run_and_an_identical_search_spends_nothing(self):
         turns = [decision(search_action(CANDIDATES[0][0], "Table this"), repick(2, None, None), finish=False),
                  decision()]
-        results, systems, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns})
+        for locked in (False, True):
+            with self.subTest(locked=locked):
+                results, systems, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns}, locked=locked)
+                agent = results["agent"]
+                self.assertEqual((systems["agent"][1].args, len(agent.tool_calls)), ([], 6))
+                self.assertEqual(step(agent, "validate_agent_1").details["noops"],
+                                 [{"step": "search_1_1", "slot": None, "reason": "identical_search"},
+                                  {"step": "repick_1_2", "slot": 2, "reason": "nothing_to_remove"}])
+                second = payloads(systems, "agent")[1]
+                self.assertEqual([(a["outcome"], a.get("noop")) for a in second["earlier_actions"]],
+                                 [("noop:identical_search", True), ("noop:nothing_to_remove", True)])
+                self.assertEqual(second["remaining"]["searches"], CONTINUATION_BUDGET.searches)
+
+    def test_g1_guards_a_slot_the_locked_agent_filled(self):
+        """Under the lock G1 still protects what the agent verified itself: a later failed change keeps it."""
+        turns = [decision(replace(2, CANDIDATES[3][0], "revisit it", "c3h1s1", "We should revisit it"), finish=False),
+                 decision(replace(2, "Let's shelve this.", "shelve this", "c4h1s1", "Nothing relevant"))]
+        results, _, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns}, locked=True)
         agent = results["agent"]
-        self.assertEqual((systems["agent"][1].args, len(agent.tool_calls)), ([], 6))
+        self.assertEqual(step(agent, "replace_2_1").details["outcome"], "kept_verified_example")
+        self.assertEqual(step(agent, "validate_agent_2").details["guard"],
+                         [{"slot": 2, "kept_ref": "c3h1s1", "reason": "replace_rejected:wording_lacks_key_phrase",
+                           "moved_to_end": False}])
+        self.assertEqual([i.citation.quote for i in agent.expressions],
+                         [TEXTS[0], "I hold off on lunch when I'm busy.", TEXTS[3]])
+
+
+class LockTests(unittest.TestCase):
+    """The verified-slot lock (D1): what the first stage verified is final; the rest only fills empty slots."""
+
+    FIRST_QUOTES = [TEXTS[0], "I hold off on lunch when I'm busy."]  # slots 0 and 1 of TWO_VERIFIED
+
+    def test_the_registered_systems_are_locked_and_the_submission_agent_is_explicit(self):
+        self.assertEqual([(name, p.locked) for name, p in SYSTEMS.items()], [("baseline", True), ("agent", True)])
+        self.assertEqual((type(system_for("agent")), system_for("agent").prompt),
+                         (AgentPipeline, prompts.AGENT_LOCKED_PROMPT))
+        self.assertEqual((SUBMISSION_AGENT.locked, SUBMISSION_AGENT.prompt), (False, prompts.AGENT_PROMPT))
+        # the locked prompt is the submission prompt plus one paragraph
+        self.assertEqual(prompts.AGENT_LOCKED_PROMPT.replace(_LOCKED + "\n", "", 1), prompts.AGENT_PROMPT)
+
+    def test_three_verified_examples_end_both_systems_after_the_first_stage(self):
+        turn = decision(repick(1, "c2h1s2", "We should hold off on it until the review"))
+        with patch.object(BaselinePipeline, "improve", side_effect=AssertionError("the baseline ran")), \
+                patch.object(AgentPipeline, "improve", side_effect=AssertionError("the agent ran")):
+            results, systems, _, _ = run_systems(THREE_VERIFIED, replies={"agent": [turn]}, locked=True)
+        for name in NAMES:
+            with self.subTest(system=name):
+                result = results[name]
+                self.assertEqual((systems[name][0].prompts, systems[name][1].args), ([], []))
+                self.assertEqual(stages(result), ["assemble"])
+                self.assertEqual((result.status, result.model_rounds, len(result.tool_calls)), ("ok", 2, 6))
+                self.assertEqual([i.citation.quote for i in result.expressions], [*self.FIRST_QUOTES, TEXTS[5]])
+        self.assertEqual(shown(results["agent"]), shown(results["baseline"]))
+
+    def test_repicks_and_replaces_on_locked_slots_are_noops_and_searches_still_run(self):
+        """D1: a repick or replace naming a locked slot is noop "locked" and spends nothing; a search
+        naming one runs like any search (its spans cannot change the locked slot)."""
+        turns = [decision(repick(1, "c2h1s2", "We should hold off on it until the review"),
+                          replace(0, "Shall we pause here?", "pause here", None, None),
+                          search_action("hold off", "hold off on", slot=1),
+                          search_action("Shall we pause here?", "pause here", slot=2), finish=False),
+                 decision(repick(1, "a1k3h1s1", "We hold off on it", reason="a clearer quote"),
+                          replace(2, "Shall we pause here?", "pause here", "a1k4h1s1", "Shall we pause here"))]
+        results, systems, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns}, locked=True,
+                                             texts={"agent": ["We hold off on it until Friday.",
+                                                              "Shall we pause here and regroup?"]})
+        agent, model, search = results["agent"], *systems["agent"]
+        self.assertEqual([p[0] for p in model.prompts], [prompts.AGENT_LOCKED_PROMPT] * 2)
+        first, second = payloads(systems, "agent")
+        self.assertEqual([s["locked"] for s in first["draft"]], [True, True, False])
+        self.assertEqual(stages(agent), ["agent_1", "repick_1_1", "replace_1_2", "search_1_3", "search_1_4",
+                                         "validate_agent_1", "agent_2", "repick_2_1", "replace_2_2",
+                                         "validate_agent_2", "assemble"])
+        for stage, slot in (("repick_1_1", 1), ("replace_1_2", 0), ("repick_2_1", 1)):
+            details = step(agent, stage).details
+            self.assertEqual({k: details[k] for k in ("noop", "slot", "locked")},
+                             {"noop": "locked", "slot": slot, "locked": True}, stage)
+        self.assertNotIn("noop", step(agent, "search_1_3").details)  # the search for a locked slot ran
+        self.assertEqual(step(agent, "search_1_3").details["slot"], 1)
         self.assertEqual(step(agent, "validate_agent_1").details["noops"],
-                         [{"step": "search_1_1", "slot": None, "reason": "identical_search"},
-                          {"step": "repick_1_2", "slot": 2, "reason": "nothing_to_remove"}])
-        second = payloads(systems, "agent")[1]
+                         [{"step": "repick_1_1", "slot": 1, "reason": "locked"},
+                          {"step": "replace_1_2", "slot": 0, "reason": "locked"}])
+        self.assertEqual(step(agent, "validate_agent_2").details["noops"],
+                         [{"step": "repick_2_1", "slot": 1, "reason": "locked"}])
+        # both searches ran (2 of the 9); the noops made no call and no search
+        self.assertEqual([a.literal_phrase for a in search.args], ["hold off on", "pause here"])
+        self.assertEqual((agent.model_rounds, len(agent.tool_calls)), (2 + 2, 6 + 2))
+        self.assertEqual(second["remaining"]["searches"], CONTINUATION_BUDGET.searches - 2)
         self.assertEqual([(a["outcome"], a.get("noop")) for a in second["earlier_actions"]],
-                         [("noop:identical_search", True), ("noop:nothing_to_remove", True)])
+                         [("noop:locked", True)] * 2 + [("searched", None)] * 2)
+        self.assertEqual([s["locked"] for s in second["draft"]], [True, True, False])
+        # what the learner saw first is unchanged and first; the empty slot is filled
+        self.assertEqual(shown(agent), [(CANDIDATES[0][0], True), (CANDIDATES[2][0], True),
+                                        ("Shall we pause here?", True)])
+        self.assertEqual([i.citation.quote for i in agent.expressions],
+                         [*self.FIRST_QUOTES, "Shall we pause here and regroup?"])
+
+    def test_a_slot_the_agent_fills_is_not_locked_and_stays_under_the_guard(self):
+        turns = [decision(replace(2, CANDIDATES[3][0], "revisit it", "c3h1s1", "We should revisit it"), finish=False),
+                 decision(repick(2, None, None, reason="a shorter quote would read better"))]
+        results, systems, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns}, locked=True)
+        agent = results["agent"]
+        second = payloads(systems, "agent")[1]
+        self.assertEqual([(s["locked"], s["example"] is not None) for s in second["draft"]],
+                         [(True, True), (True, True), (False, True)])  # the lock is read once, before turn 1
+        self.assertEqual(step(agent, "repick_2_1").details["outcome"], "kept_verified_example")  # G1, not a noop
+        self.assertEqual(step(agent, "validate_agent_2").details["noops"], [])
+        self.assertEqual([i.citation.quote for i in agent.expressions], [*self.FIRST_QUOTES, TEXTS[3]])
+
+    def test_the_pick_only_call_keeps_the_lock(self):
+        def busy(turn):
+            return decision(*(search_action(f"query {turn}{i}", None) for i in range(4)), finish=False)
+
+        final = {"assessment": "Last pick.", "actions": [repick(0, "a3k1h1s1", "Let's table this")]}
+        results, systems, _, _ = run_systems(TWO_VERIFIED, replies={"agent": [busy(1), busy(2), busy(3), final]},
+                                             texts={"agent": ["Unrelated."] * 8 + ["Let's table this one."]},
+                                             locked=True)
+        agent = results["agent"]
+        self.assertEqual(stages(agent)[-4:], ["pick_final", "repick_final_1", "validate_pick_final", "assemble"])
+        self.assertEqual(step(agent, "repick_final_1").details["noop"], "locked")
+        self.assertTrue(payloads(systems, "agent")[-1]["final_pick"])
+        self.assertEqual([s["locked"] for s in payloads(systems, "agent")[-1]["draft"]], [True, True, False])
+        self.assertEqual([i.citation.quote for i in agent.expressions[:2]], self.FIRST_QUOTES)
+
+    def test_a_spent_budget_under_the_lock_assembles_what_exists(self):
+        deps = CoachDependencies(ScriptedModel(candidates(), TWO_VERIFIED), searches(*TEXTS))
+        draft = run_first_stage(RequestSession(deps, FIRST_STAGE_BUDGET), QUESTION)
+        turn = decision(repick(0, "c0h1s1", "let's table this for now"),
+                        search_action("Shall we pause here?", "pause here", slot=2), finish=False)
+        session = RequestSession(CoachDependencies(ScriptedModel(turn), searches("Unrelated.")), Budget(1, 1))
+        expressions, _ = system_for("agent").answer(session, draft)
+        result = session.result("agent", "ok", expressions=expressions)
+        self.assertEqual([s.stage for s in result.trace], ["agent_1", "repick_1_1", "search_1_2", "validate_agent_1",
+                                                           "budget_exhausted", "assemble"])
+        self.assertEqual((result.trace[1].details["noop"], result.trace[4].details["code"]),
+                         ("locked", "model_budget_exhausted"))
+        self.assertEqual([i.citation.quote for i in expressions[:2]], self.FIRST_QUOTES)
+        self.assertIsNone(expressions[2].citation)
+
+    def test_a_model_error_after_the_first_stage_fails_the_locked_agent(self):
+        turns = [decision(search_action("Shall we pause here?", "pause here", slot=2), finish=False),
+                 RuntimeError("provider down")]
+        results, _, _, _ = run_systems(TWO_VERIFIED, replies={"agent": turns}, texts={"agent": ["Unrelated."]},
+                                       locked=True)
+        agent = results["agent"]
+        self.assertEqual((agent.status, agent.error_code), ("error", "model_unavailable"))
+        self.assertEqual(stages(agent)[:3], ["agent_1", "search_1_1", "validate_agent_1"])
+        self.assertIsNone(agent.expressions)  # keeping what was sent first is the server's job
+
+    def test_without_a_verified_example_nothing_is_locked(self):
+        turn = decision(repick(0, "c0h1s1", "let's table this for now", reason="copy the wording exactly"))
+        results, systems, _, _ = run_systems({"picks": []}, replies={"agent": [turn]}, locked=True)
+        self.assertEqual([s["locked"] for s in payloads(systems, "agent")[0]["draft"]], [False, False, False])
+        self.assertEqual(step(results["agent"], "repick_1_1").details["outcome"], "verified")
+
+    def test_the_submission_agent_still_reviews_three_verified_examples(self):
+        turn = decision(repick(1, "c2h1s2", "We should hold off on it until the review"))
+        results, systems, _, _ = run_systems(THREE_VERIFIED, replies={"agent": [turn]}, locked=False)
+        self.assertEqual([p[0] for p in systems["agent"][0].prompts], [prompts.AGENT_PROMPT])
+        self.assertFalse(any("locked" in s for s in payloads(systems, "agent")[0]["draft"]))
+        self.assertEqual(step(results["agent"], "repick_1_1").details["outcome"], "verified")
+        self.assertEqual(results["agent"].expressions[1].citation.quote, "We should hold off on it until the review.")
 
 
 class DroppedFeedbackTests(unittest.TestCase):
@@ -415,21 +592,22 @@ class DroppedFeedbackTests(unittest.TestCase):
     def test_both_systems_tell_their_next_decision_call_what_was_dropped(self):
         gapped_revision = replacement(2, "Let's treat it as done.", "treat ... as")
         gapped_action = replace(2, "Let's treat it as done.", "treat ... as", None, None)
-        _, systems, _, _ = run_systems(TWO_VERIFIED, replies={
-            "baseline": [revision(gapped_revision, replacement(2, "Let's shelve it.", "shelve it")), {"picks": []},
-                         revision()],
-            "agent": [decision(gapped_action, finish=False), decision()]},
-            texts={"baseline": ["Unrelated."]})
         expected = {"baseline": ("revise_1", "replacements", 0, 2, 2), "agent": ("agent_1", "actions", 0, 2, 1)}
-        for name, (stage, items, index, slot, call) in expected.items():
-            with self.subTest(system=name):
-                first, later = payloads(systems, name)[0], payloads(systems, name)[call]
-                self.assertEqual(first.get("dropped_last_turn"), [])
-                dropped = later["dropped_last_turn"]
-                self.assertEqual(len(dropped), 1)
-                self.assertEqual((dropped[0]["step"], dropped[0]["list"], dropped[0]["index"], dropped[0]["slot"]),
-                                 (stage, items, index, slot))
-                self.assertTrue(dropped[0]["reason"].endswith("key_phrase_not_contiguous"))
+        for locked in (False, True):  # the submission agent and the locked default agent
+            _, systems, _, _ = run_systems(TWO_VERIFIED, replies={
+                "baseline": [revision(gapped_revision, replacement(2, "Let's shelve it.", "shelve it")),
+                             {"picks": []}, revision()],
+                "agent": [decision(gapped_action, finish=False), decision()]},
+                texts={"baseline": ["Unrelated."]}, locked=locked)
+            for name, (stage, items, index, slot, call) in expected.items():
+                with self.subTest(locked=locked, system=name):
+                    first, later = payloads(systems, name)[0], payloads(systems, name)[call]
+                    self.assertEqual(first.get("dropped_last_turn"), [])
+                    dropped = later["dropped_last_turn"]
+                    self.assertEqual(len(dropped), 1)
+                    self.assertEqual((dropped[0]["step"], dropped[0]["list"], dropped[0]["index"],
+                                      dropped[0]["slot"]), (stage, items, index, slot))
+                    self.assertTrue(dropped[0]["reason"].endswith("key_phrase_not_contiguous"))
 
 
 class DeclineTests(unittest.TestCase):

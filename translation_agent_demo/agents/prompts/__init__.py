@@ -10,15 +10,16 @@ stated in general terms, so a score cannot come from text the prompt already con
 
     prefix.py     CANDIDATES_PROMPT, SELECT_PROMPT (the shared first stage; SELECT also in baseline rounds)
     baseline.py   REVISE_PROMPT: one fixed revision per round
-    agent.py      AGENT_PROMPT: every turn, and the pick-only final call
+    agent.py      AGENT_LOCKED_PROMPT (the default agent, verified-slot lock) and AGENT_PROMPT
+                  (the submission agent, locked=False): every turn, and the pick-only final call
     shared.py     paragraphs both systems' prompts use word for word
 
 tests/test_frozen.py pins every prompt, so a change to what the model reads is always deliberate.
 """
 
 
-from .agent import AGENT_PROMPT
+from .agent import AGENT_LOCKED_PROMPT, AGENT_PROMPT
 from .baseline import REVISE_PROMPT
 from .prefix import CANDIDATES_PROMPT, SELECT_PROMPT
 
-__all__ = ["CANDIDATES_PROMPT", "SELECT_PROMPT", "REVISE_PROMPT", "AGENT_PROMPT"]
+__all__ = ["CANDIDATES_PROMPT", "SELECT_PROMPT", "REVISE_PROMPT", "AGENT_PROMPT", "AGENT_LOCKED_PROMPT"]

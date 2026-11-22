@@ -19,6 +19,11 @@ How a request flows:
 Both systems use the same tools (tools/), ceilings (systems/base.py) and verifier
 (evidence.py); they differ only in who decides the next step: code or the model.
 
+Both keep the verified-slot lock (systems/base.py): an example the first stage verified is final,
+the continuation only fills slots without one, and a first stage that verified every slot ends the
+request. The agent of the submitted evaluation, which could change verified examples, is
+AgentPipeline(locked=False): ExpressionCoach(dependencies, AgentPipeline(locked=False)).
+
 Layout:
     coach.py      answer a request: validate input, run the first stage and the system(s)
     systems/      the first stage, the shared base, the baseline and the agent

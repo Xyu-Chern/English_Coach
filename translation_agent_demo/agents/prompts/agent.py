@@ -1,16 +1,21 @@
-"""The agent's prompt: AGENT_PROMPT, every turn and the pick-only final call."""
+"""The agent's prompts, every turn and the pick-only final call:
+
+    AGENT_LOCKED_PROMPT   the default agent (AgentPipeline()): the verified-slot lock (D1)
+    AGENT_PROMPT          the submission agent (AgentPipeline(locked=False)), unchanged
+"""
 
 from .shared import DROPPED_LAST_TURN, G1_GUARD, SHOWS_EXPRESSION, _PARITY, _UNTRUSTED
 
 # ---------------------------------------------------------------------------
-# 4. AGENT_PROMPT: each agent turn (at most 3), and the pick-only final call.
+# 4. AGENT_PROMPT / AGENT_LOCKED_PROMPT: each agent turn (at most 3), and the pick-only
+#    final call. AGENT_LOCKED_PROMPT is AGENT_PROMPT with one more paragraph (_LOCKED).
 #
 # In:  {"question", "final_pick", "remaining": {"turns_after_this", "searches",
 #      "pick_call_follows_if_you_search"}, "draft": [{"slot", "expression", "key_phrase",
 #      "function", "note", "example" (ref, quote, episode, source_use, adaptation) | null,
-#      "rejection_reasons"}], "other_candidates", "passages": [{"search", "query",
-#      "key_phrase", "corpus_count", "spans"}], "earlier_actions" (noops marked),
-#      "dropped_last_turn"}.
+#      "rejection_reasons", "locked" (AGENT_LOCKED_PROMPT only)}], "other_candidates",
+#      "passages": [{"search", "query", "key_phrase", "corpus_count", "spans"}],
+#      "earlier_actions" (noops marked), "dropped_last_turn"}.
 # Out: AgentDecision (assessment, actions, finish) or, in the final pick, FinalPick
 #      (assessment, actions without search).
 # Why these rules:
@@ -32,6 +37,12 @@ from .shared import DROPPED_LAST_TURN, G1_GUARD, SHOWS_EXPRESSION, _PARITY, _UNT
 #   framed as competing choices for the agent's judgment, not as a rule.
 # - The action cap and the free-text lengths are stated because Claude does not enforce
 #   maxItems: code keeps the first 6 actions, and a reply past SessionLimits fails the step.
+# - The lock (_LOCKED, AGENT_LOCKED_PROMPT only): the first stage's verified examples are
+#   shown to the learner before the agent runs, so they must not change. Code turns a
+#   repick or replace naming a locked slot into a noop (D1); a search still runs, since its
+#   spans may serve another slot. The paragraph says both, so the turns go to the empty
+#   slots and to new expressions instead of being wasted. It overrides the review of
+#   verified examples (rule 1) for locked slots only.
 _AGENT_HEAD = """You review and improve an answer for an English learner: up to 3 places (slots),
 each a natural English expression for the learner's request, backed by one
 podcast-transcript span. """ + _UNTRUSTED + """
@@ -97,5 +108,17 @@ choose by judgment:
   spans, when the phrase is absent or its uses are exhausted.
 - leave: keep the slot as it is."""
 
+_LOCKED = """Locked slots: a slot with "locked": true had a verified example before your first turn
+and has already been shown to the learner, so it is final. Do not review it for a change:
+a repick or replace that names a locked slot does nothing (it is recorded as noop locked
+and spends no budget). A search that names a locked slot still runs and spends a search,
+but nothing it finds can change that slot. Locked slots still count toward the request's
+constraints, so meet a missing constraint with a slot that is not locked. Spend your
+actions on the slots that are not locked, and search with slot null to look for an
+expression that is not in the draft."""
+
 AGENT_PROMPT = "\n".join([_AGENT_HEAD, SHOWS_EXPRESSION, _RECOVERY, _ACTIONS, _SEARCH, _REPICK, _REPLACE,
                           _AGENT_GUARD, DROPPED_LAST_TURN, _FINISH, _ACCEPTANCE, _LENGTHS, _RETURN])
+AGENT_LOCKED_PROMPT = "\n".join([_AGENT_HEAD, SHOWS_EXPRESSION, _RECOVERY, _ACTIONS, _SEARCH, _REPICK, _REPLACE,
+                                 _AGENT_GUARD, _LOCKED, DROPPED_LAST_TURN, _FINISH, _ACCEPTANCE, _LENGTHS,
+                                 _RETURN])

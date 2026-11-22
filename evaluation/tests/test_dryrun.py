@@ -35,10 +35,12 @@ def _rows(run_dir: Path) -> dict:
 
 
 class DryRunTests(unittest.TestCase):
+    """The authored scenarios with the submitted evaluation's agent (no verified-slot lock)."""
+
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
-        cls.run_dir = dry_run(Path(cls.directory.name), run="dryrun", repeats=1)
+        cls.run_dir = dry_run(Path(cls.directory.name), run="dryrun", repeats=1, locked=False)
         cls.grades = {g["key"]: g for g in read_jsonl(cls.run_dir / "grades" / "grades.jsonl")}
         cls.rows = _rows(cls.run_dir)
 
@@ -134,6 +136,46 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(steps["validate_agent_2"], "3/3 slots verified")
         self.assertTrue(all(e["verified"] and e["quote"] for e in agent["ko-spec-ctx-1"]["expressions"]))
         self.assertEqual(agent["ko-unans-injection"]["expressions"], [])
+
+
+class LockedDryRunTests(unittest.TestCase):
+    """The same scenarios with the registered agent, which keeps the verified-slot lock (D1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.run_dir = dry_run(Path(cls.directory.name), run="dryrun-locked", repeats=1)
+        cls.grades = {g["key"]: g for g in read_jsonl(cls.run_dir / "grades" / "grades.jsonl")}
+        cls.rows = _rows(cls.run_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def test_three_verified_examples_end_both_systems_after_the_first_stage(self):
+        for task in ("ko-spec-ctx-1", "ko-usage-con-1"):
+            with self.subTest(task=task):
+                agent, baseline = self.rows["agent"][task]["result"], self.rows["baseline"][task]["result"]
+                self.assertEqual(_own(self.rows["agent"][task]), ["assemble"])
+                self.assertTrue(all(e.get("shared") for e in agent["model_events"]))  # no call of its own
+                self.assertEqual(agent["expressions"], baseline["expressions"])
+                self.assertEqual(self.grades[f"{task}/agent/1"]["passed"], self.grades[f"{task}/baseline/1"]["passed"])
+
+    def test_the_agent_still_fills_a_slot_without_a_verified_example(self):
+        self.assertEqual(_own(self.rows["agent"]["ko-spec-idiom-ctx-1"]),
+                         ["agent_1", "repick_1_1", "validate_agent_1", "assemble"])
+        self.assertEqual(self.grades["ko-spec-idiom-ctx-1/agent/1"]["passed"], True)
+
+    def test_every_example_verified_first_leads_the_final_answer_unchanged(self):
+        for system in SYSTEMS:
+            for task, row in self.rows[system].items():
+                with self.subTest(system=system, task=task):
+                    first = next((s for s in row["result"]["trace"] if s["stage"] == "validate_select_1"), None)
+                    shown = [(s["expression"], s["quote"]) for s in (first or {}).get("details", {}).get("slots", [])
+                             if s["status"] == "verified"]
+                    final = [(e["expression"], (e.get("citation") or {}).get("quote"))
+                             for e in row["result"]["expressions"] or []]
+                    self.assertEqual(final[:len(shown)], shown)
 
 
 if __name__ == "__main__":

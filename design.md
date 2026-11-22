@@ -1,6 +1,6 @@
 # AI English Speaking Phrase Agent — Design
 
-> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below.
+> **Status:** Updated draft. English version first; Chinese and Korean versions follow. This design prioritizes Agent development. The learner-client extension now delivers a web interface and an Android app; the original three-week scope is recorded below. Owner decisions D1 (the verified-slot lock) and D6 (a re-evaluation) are recorded under Learner clients.
 
 ### Current minimal demo slice
 
@@ -63,7 +63,7 @@ flowchart TD
   I --> J
 ```
 
-Keep the model's autonomy bounded. The Agent may interpret intent, choose search filters, and decide whether to answer or clarify. It must not invent a database result, change user data without an explicit tool call, or retry indefinitely. A deterministic workflow should enforce schemas, permissions, step limits, and failure behavior.
+Keep the model's autonomy bounded. The Agent may interpret intent, choose search filters, and decide whether to answer or clarify. It must not invent a database result, change user data without an explicit tool call, or retry indefinitely. Under the verified-slot lock, it must not change an example the first stage verified (see Learner clients). A deterministic workflow should enforce schemas, permissions, step limits, and failure behavior.
 
 ## 5. Search tool and expression data
 
@@ -166,19 +166,52 @@ The web client and installable Android client share a bilingual interface and an
 
 The live Vercel app serves the chat UI, Android download and coach at the same HTTPS origin. A deployment includes 185 reviewed passages, their vectors and the MiniLM encoder. Vercel computes the query vector and calls the Responses gateway. Anyone can ask a question directly. The computer can be off. Publish a new snapshot when transcripts or rights change.
 
+#### Owner decisions D1 and D6
+
+Agreed on 2026-11-21. The sections below implement the coach side of D1 and prepare D6.
+
+| ID | Decision |
+|---|---|
+| D1 | When the first stage verifies at least one example, send only the verified expressions and examples at once. They never change. The continuation (baseline or agent) fills only the empty slots. With all three verified, neither system runs a continuation. With none verified, send the finished answer once. |
+| D6 | After the lock, re-run the baseline and the locked agent locally with the real API (50 tasks × 3, then grading, about $6). |
+
+#### Verified-slot lock and evaluation reproducibility
+
+In the submission run's 129 normal answers, the first stage verified all three slots in 82 (63.6%), one or two in 44 (34.1%) and none in 3 (2.3%). The LLM judge (three votes, not human truth) rated 277 of the 319 first-stage verified examples (86.8%) grounded-good. The submission agent later removed 45 of these examples from 43 answers. The lock keeps all of them, 8 of which were rated poor (2.5% of the 319).
+
+- The agent locks the slots that are verified when it starts. A repick or replace that names a locked slot is recorded as a noop (`locked`) and spends no budget. A search that names a locked slot still runs and spends a search, but cannot change that slot. The decision input marks each slot `locked`. The prompt `AGENT_LOCKED_PROMPT` is the submission prompt plus one paragraph. Slots the agent fills later are not locked; the existing G1 guard protects them. The baseline never changed a verified slot.
+- When the first stage verified every slot, neither system runs a continuation: no model call, no search.
+- Both registered systems keep the lock. The submission agent stays in the code as `AgentPipeline(locked=False)`. It is not registered and has no command-line switch.
+- The submitted results (`evaluation/results/submission`, `SUBMISSION.md`) came from the pre-lock code at commit `173cbed`. They stay unchanged. Check out that commit to reproduce them.
+- `python -m evaluation.eval` now runs the locked agent under the same name, `agent`. Put `locked` in a new run's name. The run manifest now hashes the `agents/` subpackages too, so a run folder made before this change refuses to resume.
+
+#### Re-evaluation (D6)
+
+- **What:** the baseline and the locked agent on the 50 tasks × 3 runs, then the three-vote judge, with the submission's models, judge, repeats, seed and task file. About $6, estimated from the submission's usage at list prices.
+- **Where:** locally, against the PostgreSQL copy of the evaluation snapshot (`evaluation_snapshot_v2`), with the API keys in the demo settings.
+- **Steps:** `python -m evaluation.snapshot_store verify`. Then `python -m evaluation.eval run --run d6-locked-<date> --prepare-only`, and compare its manifest with the submission's. Run a trial with `--max-new 6` and stop if the extrapolated total exceeds $7. Then `python -m evaluation.eval all --run d6-locked-<date>`. Always pass `--run`: the default is `submission`.
+- **Checks:** no first-stage verified example changes, no continuation call when every slot is verified, the count of infrastructure errors and the actual cost.
+- **Record here:** pass, strict pass, pass@3 and pass^3, the first-stage distribution, total time, tokens, locked noops and the actual cost, next to the figures above.
+- **Status:** done locally on 2026-11-22 (run `lock-20261122`, actual cost $3.63 at list prices). The submitted results are unchanged.
+
+**Result.** The lock held: all 323 first-stage verified examples stayed in the final answers (0 requests lost one; 43 in the submission), all 93 requests with three verified slots skipped the continuation, and there were 0 locked noops because none of the agent's 147 continuation actions named a locked slot. The first stage verified 3 / 1–2 / 0 slots in 93 / 30 / 5 of 128 normal answers. The agent's advantage disappeared: pass is 85.3% (128/150) for both systems (submission: baseline 88.7%, agent 92.0%), and strict is 55.3% for the baseline and 54.0% for the agent (submission: 61.3% and 69.3%), a difference of −1.6 pp (95% CI −6.2 to +2.3). Pass non-inferiority holds; strict superiority does not. pass@3 is 0.96 and pass^3 0.72 for both. Mean / p95 time over all requests is 23.9 / 54.3 s for the baseline and 24.4 / 55.4 s for the agent; tokens per attempt 33,488 and 37,215; cost per attempt $0.0047 and $0.0052. With the lock, the two systems can differ only on the 35 units that ran a continuation. Both systems also scored below the submission on the same first-stage code, so a single run varies a lot. One error came from the shared first stage (`invalid_model_output`); there were no infrastructure errors.
+
+#### Known gaps
+
+- The learner clients still receive one finished answer. Sending the verified examples first (the rest of D1) is not implemented yet.
+- The app's default agent is the locked agent that D6 measured: equal to the baseline on pass, not better as the pre-lock submission agent was (judgment question R1).
+
 ## 11. Project Owner Judgment Questions
 
-1. Should the first release focus on daily conversation, IELTS speaking, or both?
-2. Should each response show one best expression or also include up to two alternatives?
-3. Should each query support optional situation/topic context?
-4. Is phrase saving/history part of the required product behavior, or a later extension?
-5. Which expression-library fields are essential to help the learner choose a phrase?
+**R1. Submission wording and deployed default after D6:** keep the locked agent as the default and write "same accuracy as the baseline, plus kept examples and skipped continuations"? Recommended: yes, because the lock keeps the D1 promise and the strict gap is not significant. Alternatives: switch the default to the baseline (cheaper, same results), or cite only the submission results and attach the D6 run as an appendix.
+
+The five earlier scope questions are settled by the delivered clients: a question takes an optional context; an answer shows up to three expressions with a key phrase, note and podcast source; saving and history stay on the device; topics follow the podcast corpus.
 
 ---
 
 # AI 英语口语表达 Agent — 设计文档
 
-> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。
+> **状态：**更新后的草案。英文版在前，其后依次为中文版和韩文版。本设计优先展示 Agent 开发；后续学习端已交付网页和 Android 应用，下文保留原三周范围。项目负责人决定 D1（核对位置锁定）和 D6（重新评估）记录在「学习客户端」中。
 
 ### 当前最小 Demo 切片
 
@@ -241,7 +274,7 @@ flowchart TD
   I --> J
 ```
 
-限制模型的自主范围。Agent 可以理解意图、选择搜索筛选条件，并决定回答还是澄清；不得编造数据库结果、未经明确工具调用就修改用户数据，也不得无限重试。工作流应通过确定性逻辑执行结构校验、权限、步骤上限和故障处理。
+限制模型的自主范围。Agent 可以理解意图、选择搜索筛选条件，并决定回答还是澄清；不得编造数据库结果、未经明确工具调用就修改用户数据，也不得无限重试。在核对位置锁定下，也不得修改第一阶段核对通过的例句（见「学习客户端」）。工作流应通过确定性逻辑执行结构校验、权限、步骤上限和故障处理。
 
 ## 5. 搜索工具与表达数据
 
@@ -344,19 +377,52 @@ flowchart TD
 
 Vercel 独立网址同时提供聊天首页、Android 安装包和教练接口。云端随部署携带 185 个字幕片段、对应向量与 MiniLM 编码器，在云端计算问题向量并调用 Responses 接口。手机打开即可提问，电脑可以关机。字幕或使用许可发生变化时需重新发布快照。
 
+#### 项目负责人决定 D1 和 D6
+
+2026-11-21 确定。下文实现 D1 的教练部分，并为 D6 做好准备。
+
+| 编号 | 决定 |
+|---|---|
+| D1 | 第一阶段至少核对通过一个例句时，立即只发送核对通过的表达和例句，之后不再改变。后续阶段（baseline 或 agent）只填补空位。三个都核对通过时，两个系统都不运行后续阶段。一个都没有时，完成后一次发送最终答案。 |
+| D6 | 加锁后，在本地用真实 API 重新评估 baseline 和加锁的 agent（50 题 × 3 次，再评分，约 6 美元）。 |
+
+#### 核对位置锁定与评估可重现性
+
+在提交运行的 129 个正常回答中，第一阶段三个位置全部核对通过的有 82 个（63.6%），一到两个的有 44 个（34.1%），一个都没有的有 3 个（2.3%）。LLM 评审（三票多数，不是人工标准答案）认为第一阶段核对通过的 319 个例句中有 277 个（86.8%）为 grounded-good。提交时的 agent 后来从 43 个回答中删掉了其中 45 个例句。加锁后这些例句全部保留，其中 8 个被评为较差（占 319 个的 2.5%）。
+
+- agent 在开始时锁定已经核对通过的位置。指向锁定位置的 repick 或 replace 会记录为 noop（`locked`），不消耗预算。指向锁定位置的 search 仍会执行并消耗一次检索，但不能改变该位置。判断输入为每个位置标注 `locked`。提示词 `AGENT_LOCKED_PROMPT` 是提交时的提示词再加一段。agent 之后填入的位置不锁定，由原有的 G1 保护规则保护。baseline 本来就不修改已核对的位置。
+- 第一阶段所有位置都核对通过时，两个系统都不运行后续阶段：没有模型调用，也没有检索。
+- 两个已注册的系统都遵守锁定。提交时的 agent 以 `AgentPipeline(locked=False)` 保留在代码中，未注册，也没有命令行开关。
+- 已提交的结果（`evaluation/results/submission`、`SUBMISSION.md`）由加锁前提交 `173cbed` 的代码产生，保持不变。要重现这些结果，请检出该提交。
+- `python -m evaluation.eval` 现在以同一名称 `agent` 运行加锁的 agent。新运行的名称中请加入 `locked`。运行清单现在也对 `agents/` 子包计算哈希，因此在本次修改前创建的运行文件夹会拒绝续跑。
+
+#### 重新评估（D6）
+
+- **内容：** 用 50 题 × 3 次运行 baseline 和加锁的 agent，再用三票评审评分；模型、评审、重复次数、随机种子和题目文件与提交时相同。按提交运行的用量和公开价格估算，约 6 美元。
+- **地点：** 在本地运行，使用评估快照的 PostgreSQL 副本（`evaluation_snapshot_v2`）和 Demo 配置中的 API 密钥。
+- **步骤：** 先运行 `python -m evaluation.snapshot_store verify`。再运行 `python -m evaluation.eval run --run d6-locked-<日期> --prepare-only`，把生成的清单与提交时的清单对比。用 `--max-new 6` 试跑，外推总额超过 7 美元就停止。然后运行 `python -m evaluation.eval all --run d6-locked-<日期>`。始终指定 `--run`：默认值是 `submission`。
+- **检查：** 第一阶段核对通过的例句改动为 0，所有位置都核对通过时后续调用为 0，基础设施错误数，以及实际费用。
+- **在此记录：** 通过率、严格通过率、pass@3 和 pass^3、第一阶段分布、完成时间、token、锁定 noop 数和实际费用，与上方数据并列。
+- **状态：** 已于 2026-11-22 在本地完成（运行 `lock-20261122`，按公开价格估算的实际费用为 3.63 美元）。提交结果保持不变。
+
+**结果。** 锁定按设计生效：第一阶段核对通过的 323 个例句全部留在最终回答中（丢失例句的请求为 0；提交时为 43），三个位置都核对通过的 93 个请求全部跳过后续阶段；锁定 noop 为 0，因为 agent 后续阶段的 147 个动作没有一个指向已锁定的位置。在 128 个正常回答中，第一阶段核对通过 3 个 / 1–2 个 / 0 个位置的分别有 93 / 30 / 5 个。agent 的优势消失了：两个系统的通过率都是 85.3%（128/150）（提交时 baseline 88.7%，agent 92.0%）；严格通过率 baseline 为 55.3%，agent 为 54.0%（提交时为 61.3% 和 69.3%），差值为 −1.6 个百分点（95% 置信区间 −6.2 至 +2.3）。通过率非劣效条件成立，严格通过率优势条件不成立。pass@3 都是 0.96，pass^3 都是 0.72。全部请求的平均 / p95 用时：baseline 23.9 / 54.3 秒，agent 24.4 / 55.4 秒；每次尝试的 token 为 33,488 和 37,215；每次尝试的费用为 0.0047 和 0.0052 美元。加锁后，两个系统只可能在运行了后续阶段的 35 个单元上出现差异。第一阶段代码与提交时相同，两个系统的分数却一起低于提交时，说明单次运行的波动很大。共享的第一阶段出现 1 次错误（`invalid_model_output`），没有基础设施错误。
+
+#### 已知差距
+
+- 学习端仍然只收到一次完成的回答。先发送已核对的例句（D1 的其余部分）尚未实现。
+- 应用默认的 agent 是 D6 评估过的加锁 agent：通过率与 baseline 相同，不像加锁前的提交 agent 那样更好（判断题 R1）。
+
 ## 11. 项目负责人判断题
 
-1. 第一版优先支持日常交流、雅思口语，还是两者都支持？
-2. 每次只显示一个最佳表达，还是再提供最多两个替代说法？
-3. 是否允许用户为每次查询补充场景/话题语境？
-4. 保存表达/搜索历史是必需行为，还是后续扩展？
-5. 哪些表达库字段对用户判断是否使用该表达最重要？
+**R1. D6 之后的提交说明和部署默认值：** 是否保留加锁的 agent 作为默认，并写明“准确率与 baseline 相同，另外能保留已发送的例句并跳过后续阶段”？建议：是，因为锁定兑现了 D1 的承诺，严格通过率的差距不显著。其他选项：把默认改为 baseline（更便宜，结果相同），或只引用提交结果，把 D6 运行作为附录。
+
+早先的五个范围问题已由已交付的客户端回答：提问可附带可选场景；每个回答最多显示三个表达，附关键短语、说明和播客出处；收藏和历史保存在设备上；话题范围取决于播客语料。
 
 ---
 
 # AI 영어 말하기 표현 Agent — 설계 문서
 
-> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다.
+> **상태:** 업데이트된 초안. 영어 버전이 먼저, 중국어 버전과 한국어 버전이 차례로 이어집니다. 이 설계는 Agent 개발을 우선합니다. 추가 학습 클라이언트로 웹과 Android 앱을 제공하며 아래에 기존 3주 범위를 기록합니다. 책임자 결정 D1(검증 슬롯 잠금)과 D6(재평가)은 학습 클라이언트 절에 기록합니다.
 
 ### 현재 최소 Demo 슬라이스
 
@@ -419,7 +485,7 @@ flowchart TD
   I --> J
 ```
 
-모델의 자율성은 제한합니다. Agent는 의도를 해석하고, 검색 필터를 고르고, 답할지 확인 질문을 할지 결정할 수 있습니다. 데이터베이스 결과를 지어내거나, 명시적인 도구 호출 없이 사용자 데이터를 변경하거나, 무한히 재시도해서는 안 됩니다. 스키마, 권한, 단계 제한, 장애 처리 동작은 결정론적 워크플로가 강제해야 합니다.
+모델의 자율성은 제한합니다. Agent는 의도를 해석하고, 검색 필터를 고르고, 답할지 확인 질문을 할지 결정할 수 있습니다. 데이터베이스 결과를 지어내거나, 명시적인 도구 호출 없이 사용자 데이터를 변경하거나, 무한히 재시도해서는 안 됩니다. 검증 슬롯 잠금 아래에서는 첫 단계에서 검증된 예문도 바꿀 수 없습니다(학습 클라이언트 절 참고). 스키마, 권한, 단계 제한, 장애 처리 동작은 결정론적 워크플로가 강제해야 합니다.
 
 ## 5. 검색 도구와 표현 데이터
 
@@ -522,10 +588,43 @@ flowchart TD
 
 Vercel의 같은 HTTPS 주소에서 대화 화면, Android 설치 파일과 코치 API를 제공한다. 배포본은 검토된 자막 185개, 벡터, MiniLM 인코더를 포함한다. 서버가 질문 벡터를 계산하고 Responses API를 호출한다. 휴대폰에서 바로 질문할 수 있으며 컴퓨터는 꺼도 된다. 자막이나 이용 허가가 바뀌면 스냅샷을 다시 배포한다.
 
+#### 책임자 결정 D1과 D6
+
+2026-11-21에 확정했다. 아래 절들은 D1의 코치 부분을 구현하고 D6을 준비한다.
+
+| ID | 결정 |
+|---|---|
+| D1 | 첫 단계에서 검증된 예문이 1개 이상이면 검증된 표현과 예문만 즉시 보낸다. 보낸 것은 이후 바뀌지 않는다. 후속 단계(baseline 또는 agent)는 빈 슬롯만 채운다. 3개 모두 검증되면 두 시스템 모두 후속 단계를 실행하지 않는다. 하나도 검증되지 않으면 끝난 답을 한 번에 보낸다. |
+| D6 | 잠금을 구현한 뒤 로컬에서 실제 API로 baseline과 잠금 agent를 다시 평가한다(50과제 × 3회, 이어서 심사, 약 $6). |
+
+#### 검증 슬롯 잠금과 평가 재현성
+
+제출 실행의 정상 답 129건 중 첫 단계에서 3개 슬롯이 모두 검증된 답은 82건(63.6%), 1~2개는 44건(34.1%), 0개는 3건(2.3%)이었다. LLM 심사(3표 다수결, 사람 정답이 아님)는 첫 단계에서 검증된 예문 319개 중 277개(86.8%)를 grounded-good으로 판정했다. 제출 때 agent는 그중 45개를 43건의 답에서 나중에 지웠다. 잠금은 이 예문을 모두 남기며, 그중 8개는 나쁘게 판정된 것이다(319개의 2.5%).
+
+- agent는 시작할 때 이미 검증된 슬롯을 잠근다. 잠긴 슬롯을 지정한 repick이나 replace는 noop(`locked`)으로 기록되고 예산을 쓰지 않는다. 잠긴 슬롯을 지정한 search는 그대로 실행되어 검색 한 번을 쓰지만, 그 슬롯을 바꾸지는 못한다. 판단 입력에는 슬롯마다 `locked`가 붙는다. 프롬프트 `AGENT_LOCKED_PROMPT`는 제출 때 프롬프트에 한 문단을 더한 것이다. agent가 나중에 채운 슬롯은 잠그지 않으며, 기존 G1 가드가 보호한다. baseline은 원래 검증된 슬롯을 바꾸지 않았다.
+- 첫 단계에서 모든 슬롯이 검증되면 두 시스템 모두 후속 단계를 실행하지 않는다. 모델 호출도 검색도 없다.
+- 등록된 두 시스템 모두 잠금을 지킨다. 제출 때 agent는 `AgentPipeline(locked=False)`로 코드에 남아 있다. 등록되지 않았고 명령줄 옵션도 없다.
+- 제출 결과(`evaluation/results/submission`, `SUBMISSION.md`)는 잠금 전 코드(커밋 `173cbed`)로 만들었고 그대로 둔다. 그 결과를 재현하려면 그 커밋을 체크아웃한다.
+- 이제 `python -m evaluation.eval`은 같은 이름 `agent`로 잠금 agent를 실행한다. 새 실행의 이름에는 `locked`를 넣는다. 실행 manifest가 이제 `agents/` 하위 패키지까지 해시하므로, 이번 변경 전에 만든 실행 폴더는 이어 하기가 거부된다.
+
+#### 재평가(D6)
+
+- **대상:** baseline과 잠금 agent를 50과제 × 3회로 실행한 뒤 3표 심사를 한다. 모델, 심사, 반복 수, 시드, 과제 파일은 제출 때와 같다. 제출 실행의 사용량을 공시 가격으로 계산하면 약 $6이다.
+- **위치:** 로컬에서 평가 스냅샷의 PostgreSQL 사본(`evaluation_snapshot_v2`)과 데모 설정의 API 키로 실행한다.
+- **순서:** `python -m evaluation.snapshot_store verify`를 먼저 실행한다. 이어서 `python -m evaluation.eval run --run d6-locked-<날짜> --prepare-only`로 만든 manifest를 제출 manifest와 비교한다. `--max-new 6`으로 시범 실행하고, 외삽한 합계가 $7를 넘으면 멈춘다. 그다음 `python -m evaluation.eval all --run d6-locked-<날짜>`를 실행한다. `--run`은 항상 지정한다. 기본값이 `submission`이기 때문이다.
+- **확인:** 첫 단계에서 검증된 예문 변경 0건, 모든 슬롯이 검증된 요청의 후속 호출 0건, 인프라 오류 수, 실제 비용.
+- **여기에 기록:** 통과, strict 통과, pass@3과 pass^3, 첫 단계 분포, 완료 시간, 토큰, 잠금 noop 수, 실제 비용을 위 수치 옆에 적는다.
+- **상태:** 2026-11-22에 로컬에서 완료했다(실행 `lock-20261122`, 공시 가격 기준 실제 비용 $3.63). 제출 결과는 바뀌지 않았다.
+
+**결과.** 잠금은 설계대로 동작했다. 첫 단계에서 검증된 예문 323개가 모두 최종 답에 남았고(예문을 잃은 요청 0건, 제출 때 43건), 세 슬롯이 모두 검증된 요청 93건은 모두 후속 단계를 생략했다. 잠금 noop은 0건인데, agent의 후속 행동 147개 중 잠긴 슬롯을 지목한 것이 하나도 없었기 때문이다. 정상 답 128개 중 첫 단계가 슬롯 3개 / 1~2개 / 0개를 검증한 답은 93 / 30 / 5개다. agent의 우위는 사라졌다. 통과율은 두 시스템 모두 85.3%(128/150)이고(제출 때 baseline 88.7%, agent 92.0%), strict는 baseline 55.3%, agent 54.0%다(제출 때 61.3%와 69.3%). 차이는 −1.6%p(95% CI −6.2 ~ +2.3)다. 통과율 비열등 조건은 통과했고 strict 우위 조건은 통과하지 못했다. pass@3은 둘 다 0.96, pass^3은 둘 다 0.72다. 전체 요청의 평균 / p95 시간은 baseline 23.9 / 54.3초, agent 24.4 / 55.4초다. 시도당 토큰은 33,488과 37,215, 시도당 비용은 $0.0047과 $0.0052다. 잠금이 걸리면 두 시스템은 후속 단계를 실행한 35개 단위에서만 달라질 수 있다. 첫 단계 코드가 제출 때와 같은데도 두 시스템이 함께 제출 때보다 낮게 나왔으므로, 실행 1회의 변동이 크다. 오류 1건은 공유 첫 단계에서 났고(`invalid_model_output`), 인프라 오류는 없었다.
+
+#### 알려진 차이
+
+- 학습 클라이언트는 아직 끝난 답 하나만 받는다. 검증된 예문 먼저 보내기(D1의 나머지)는 아직 구현하지 않았다.
+- 앱의 기본 agent는 D6에서 측정한 잠금 agent다. 통과율은 baseline과 같고, 잠금 전 제출 agent처럼 더 낫지는 않다(판단 질문 R1).
+
 ## 11. 프로젝트 책임자 판단 질문
 
-1. 첫 릴리스는 일상 대화, IELTS 말하기, 또는 둘 다 중 무엇에 집중해야 합니까?
-2. 각 응답에 가장 좋은 표현 하나만 보여 줄까요, 아니면 대안을 최대 두 개까지 함께 보여 줄까요?
-3. 각 질의에서 선택적 상황/주제 맥락을 지원해야 합니까?
-4. 표현 저장/기록은 필수 제품 동작입니까, 아니면 이후 확장입니까?
-5. 학습자가 표현을 고르는 데 꼭 필요한 표현 라이브러리 필드는 무엇입니까?
+**R1. D6 이후 제출 서술과 배포 기본값:** 잠금 agent를 기본으로 두고 "정확도는 baseline과 같고, 보낸 예문 유지와 후속 생략을 얻는다"고 적을까요? 추천: 예. 잠금이 D1의 약속을 지키고 strict 차이는 유의하지 않기 때문입니다. 다른 선택지: 기본값을 baseline으로 바꾸기(더 싸고 결과가 같음), 또는 제출 결과만 근거로 쓰고 D6 실행은 부록으로 두기.
+
+예전의 범위 질문 다섯 개는 제공한 클라이언트로 정해졌습니다. 질문에는 선택적 맥락을 붙일 수 있고, 답은 표현을 최대 세 개까지 핵심 구절·설명·팟캐스트 출처와 함께 보여 주며, 저장과 기록은 기기에 남고, 주제는 팟캐스트 코퍼스를 따릅니다.

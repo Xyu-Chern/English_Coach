@@ -1,17 +1,22 @@
 """The two systems and the first stage they share.
 
     first_stage.py   run once per request: candidates -> search each -> select -> verify
-    base.py          what both share afterwards: the same ceilings; improve, then assemble
+    base.py          what both share afterwards: the same ceilings and the verified-slot lock;
+                     improve (skipped when the first stage verified every slot), then assemble
     baseline.py      a fixed workflow: code decides each next step
     agent.py         each turn the model reviews the draft and decides the next step
+
+Both registered systems keep the verified-slot lock (D1). The agent of the submitted evaluation
+is AgentPipeline(locked=False); it is not registered, so it runs only when passed explicitly
+(ExpressionCoach(dependencies, AgentPipeline(locked=False))).
 """
 
 from .agent import AgentPipeline
-from .base import CONTINUATION_BUDGET, ExpressionPipeline
+from .base import CONTINUATION_BUDGET, ExpressionPipeline, locked_slots
 from .baseline import BaselinePipeline
 from .first_stage import FIRST_STAGE_BUDGET, run_first_stage
 
-# The two systems, in the order results are reported.
+# The two systems, in the order results are reported; the agent is the locked one.
 SYSTEMS: dict[str, ExpressionPipeline] = {p.name: p for p in (BaselinePipeline(), AgentPipeline())}
 
 
@@ -22,4 +27,4 @@ def system_for(name: str) -> ExpressionPipeline:
 
 
 __all__ = ["SYSTEMS", "system_for", "ExpressionPipeline", "BaselinePipeline", "AgentPipeline", "run_first_stage",
-           "FIRST_STAGE_BUDGET", "CONTINUATION_BUDGET"]
+           "FIRST_STAGE_BUDGET", "CONTINUATION_BUDGET", "locked_slots"]
