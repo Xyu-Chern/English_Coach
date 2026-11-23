@@ -36,6 +36,23 @@ class CoachApiTests(unittest.TestCase):
             self.assertEqual(403, self.client.post("/api/search", headers={key:value}, json={"question":"hello"}).status_code)
         self.answer.assert_not_called()
 
+    def test_stream_reports_real_steps_and_preserves_replay_id(self):
+        import json
+        from translation_agent_demo.agents.session import announce
+
+        result = self.answer.return_value
+        result.request_id = "9b471fea-ac6c-49b4-8bac-4f2d447786dc"
+        def answer(question):
+            announce("candidates")
+            announce("search_1")
+            return result
+
+        client = TestClient(make_app(answer, public_access=True, record_run=lambda _: True))
+        response = client.post("/api/search", headers={"Accept": "application/x-ndjson;progress=1"}, json={"question": "hello"})
+        events = [json.loads(line) for line in response.text.splitlines()]
+        self.assertEqual(["prepare", "candidates", "search_1"], [entry["stage"] for entry in events[:-1]])
+        self.assertEqual(result.request_id, events[-1]["answer"]["run_id"])
+
     def test_phone_pairing_and_failure_feedback(self):
         with patch.dict(os.environ, {"COACH_PAIR_CODE":"test-code"}):
             self.assertEqual(401, self.client.post("/api/search", json={"question":"帮帮我"}).status_code)

@@ -1,8 +1,8 @@
-# Phrase Room · English Coach
+# English Coach · English Coach
 
 [English](#english) · [中文](#中文) · [한국어](#한국어)
 
-[![Phrase Room presentation cover](docs/presentation/cover.jpg)](docs/presentation/Phrase-Room-demo.pptx)
+[![English Coach presentation cover](docs/presentation/cover.jpg)](docs/presentation/English-Coach-demo.pptx)
 
 ## English
 
@@ -10,8 +10,8 @@ Describe something you want to say in Chinese or Korean. The coach suggests spok
 
 | Try it | What you get |
 | --- | --- |
-| [Web app](https://phrase-room-coach.vercel.app) · [Android APK](https://phrase-room-coach.vercel.app/downloads/PhraseRoom.apk) | **Search library** works offline with eight saved phrase cards. On the web or Android, open **Ask Coach**, type your question and send it. No sign-in or connection code is required. |
-| [Animated PowerPoint demo](docs/presentation/Phrase-Room-demo.pptx) | Five slides with English speaker notes. In PowerPoint Slide Show, click to follow *by the way* from a learner’s question to Rob Pike’s original words. Scan the final slide to try the coach. |
+| [Web app](https://phrase-room-coach.vercel.app) · [Android APK](https://phrase-room-coach.vercel.app/downloads/EnglishCoach.apk) | **Search library** works offline with eight saved phrase cards. On the web or Android, open **Ask Coach**, type your question and send it. No sign-in or connection code is required. |
+| [Animated PowerPoint demo](docs/presentation/English-Coach-demo.pptx) | Five slides with English speaker notes. In PowerPoint Slide Show, click to follow *by the way* from a learner’s question to Rob Pike’s original words. Scan the final slide to try the coach. |
 | [Architecture](design.md) · [Client and deployment guide](frontend/README.md) | The live Vercel deployment bundles six episodes, 185 transcript passages and their vectors. The coach runs on the server and uses a Responses-compatible model. The guide also covers the quick translation and verified examples first, playing a cited clip from the publisher's audio, the mode switch (the database setting wins over `COACH_SYSTEM`), the daily cap, and the open `/admin` page with evaluation data and live requests. Our own Vercel package, with all 36,397 approved Changelog passages, is built but not deployed. |
 | [Chinese test cases](evaluation/data/tasks.zh.jsonl) · [Chinese evaluation report](docs/evaluation-zh/results.md) (generated, English only) · [Answer replay](docs/evaluation-zh/review.html) | The harness compares the agent with a fixed workflow. The Chinese report is a partial run. Its denominators are graded attempts. |
 
@@ -25,8 +25,8 @@ None in this file. Release decisions are open in `design.md` (judgment questions
 
 | 入口 | 怎么用 |
 | --- | --- |
-| [打开网页版](https://phrase-room-coach.vercel.app) · [下载安卓 APK](https://phrase-room-coach.vercel.app/downloads/PhraseRoom.apk) | **查表达库**可以离线查八张表达卡。在网页或安卓 App 点**问教练**，输入问题即可发送，免登录、免连接码。 |
-| [下载全英文动效 PPT](docs/presentation/Phrase-Room-demo.pptx) | 五页，附英文演讲备注。进入 PowerPoint「幻灯片放映」，点击跟随 *by the way* 找到 Rob Pike 的播客原话。最后一页可扫码试用。 |
+| [打开网页版](https://phrase-room-coach.vercel.app) · [下载安卓 APK](https://phrase-room-coach.vercel.app/downloads/EnglishCoach.apk) | **查表达库**可以离线查八张表达卡。在网页或安卓 App 点**问教练**，输入问题即可发送，免登录、免连接码。 |
+| [下载全英文动效 PPT](docs/presentation/English-Coach-demo.pptx) | 五页，附英文演讲备注。进入 PowerPoint「幻灯片放映」，点击跟随 *by the way* 找到 Rob Pike 的播客原话。最后一页可扫码试用。 |
 | [技术架构](design.md) · [运行与部署](frontend/README.md) | 线上 Vercel 部署保存了六集播客、185 段字幕及对应向量。教练在云端检索并通过 Responses 接口作答，手机使用时电脑可以关机。说明中还包括快速翻译和先发送已核对的例句、从发布者音频播放出处片段、模式切换（数据库中的设置优先于 `COACH_SYSTEM`）、每日上限，以及公开的 `/admin` 页面（评估数据和线上请求）。我们自己的 Vercel 包含全部 36,397 段已核准的 Changelog 字幕，已构建，尚未部署。 |
 | [50 道中文评测题](evaluation/data/tasks.zh.jsonl) · [中文评测报告](docs/evaluation-zh/results.md)（自动生成，仅英文） · [逐题回放](docs/evaluation-zh/review.html) | 同一批题比较智能体与固定流程基线。中文报告只覆盖已记录的运行，通过率按已评分的作答次数计算。 |
 
@@ -40,8 +40,8 @@ None in this file. Release decisions are open in `design.md` (judgment questions
 
 | 바로가기 | 사용 방법 |
 | --- | --- |
-| [웹 앱](https://phrase-room-coach.vercel.app) · [Android APK](https://phrase-room-coach.vercel.app/downloads/PhraseRoom.apk) | **표현 모음 검색**에서는 오프라인으로 표현 카드 여덟 장을 찾을 수 있습니다. 웹이나 안드로이드 앱에서 **코치에게 질문**을 누르고 질문을 보내세요. 로그인이나 연결 코드가 필요 없습니다. |
-| [영어 발표용 PowerPoint](docs/presentation/Phrase-Room-demo.pptx) | 슬라이드 다섯 장과 발표자 노트는 모두 영어입니다. 슬라이드 쇼에서 클릭하며 *by the way*가 들어간 Rob Pike의 팟캐스트 발언을 찾아가는 과정을 보세요. 마지막 장의 QR 코드로 직접 질문할 수 있습니다. |
+| [웹 앱](https://phrase-room-coach.vercel.app) · [Android APK](https://phrase-room-coach.vercel.app/downloads/EnglishCoach.apk) | **표현 모음 검색**에서는 오프라인으로 표현 카드 여덟 장을 찾을 수 있습니다. 웹이나 안드로이드 앱에서 **코치에게 질문**을 누르고 질문을 보내세요. 로그인이나 연결 코드가 필요 없습니다. |
+| [영어 발표용 PowerPoint](docs/presentation/English-Coach-demo.pptx) | 슬라이드 다섯 장과 발표자 노트는 모두 영어입니다. 슬라이드 쇼에서 클릭하며 *by the way*가 들어간 Rob Pike의 팟캐스트 발언을 찾아가는 과정을 보세요. 마지막 장의 QR 코드로 직접 질문할 수 있습니다. |
 | [시스템 설계](design.md) · [실행 및 배포](frontend/README.md) | 라이브 Vercel 배포본에는 에피소드 6개, 자막 185개와 해당 벡터가 들어 있습니다. 코치는 서버에서 검색하고 Responses API로 답하므로 컴퓨터를 꺼도 됩니다. 안내서에는 빠른 번역과 검증된 예문 먼저 보내기, 게시자 음성으로 인용 구간 듣기, 모드 전환(데이터베이스 설정이 `COACH_SYSTEM`보다 우선), 일일 상한, 평가 데이터와 실제 요청을 보여 주는 공개 `/admin` 화면도 있습니다. 승인된 Changelog 자막 36,397개 전체를 담은 우리 Vercel 패키지는 빌드했지만 아직 배포하지 않았습니다. |
 | [중국어 평가 문항](evaluation/data/tasks.zh.jsonl) · [중국어 평가 보고서](docs/evaluation-zh/results.md)(자동 생성, 영어만) · [문항별 응답](docs/evaluation-zh/review.html) | 같은 문항으로 에이전트와 고정된 절차를 따르는 기준 시스템을 비교합니다. 중국어 보고서는 부분 실행 결과이며 통과율의 분모는 채점된 응답 수입니다. |
 

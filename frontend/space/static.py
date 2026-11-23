@@ -18,7 +18,7 @@ def main():
         if (
             info.private
             or info.sdk != "static"
-            or "Phrase Room" not in (info.card_data.to_dict().get("title") or "")
+            or info.card_data.to_dict().get("title") not in {"Phrase Room", "English Coach"}
         ):
             raise SystemExit("Existing Space has different content or visibility.")
     except RepositoryNotFoundError:
@@ -41,14 +41,14 @@ def main():
         sw.write_text(sw.read_text().replace("shell-v5", "static-v5"))
         (stage / "README.md").write_text(
             """---
-title: Phrase Room
+title: English Coach
 emoji: 🎧
 colorFrom: green
 colorTo: gray
 sdk: static
 app_file: index.html
 ---
-# Phrase Room
+# English Coach
 
 Search eight bilingual phrase cards with attributed podcast quotes. The cloud coach is pending.
 ## Project Owner Judgment Questions
@@ -80,8 +80,8 @@ None.
         )
         (stage / "downloads").mkdir()
         shutil.copy2(
-            ROOT / "frontend/android/build/PhraseRoom.apk",
-            stage / "downloads/PhraseRoom.apk",
+            ROOT / "frontend/android/build/EnglishCoach.apk",
+            stage / "downloads/EnglishCoach.apk",
         )
         api.upload_folder(
             folder_path=stage,

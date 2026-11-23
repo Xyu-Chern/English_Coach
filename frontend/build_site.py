@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main():
-    apk = ROOT / "android/build/PhraseRoom.apk"
+    apk = ROOT / "android/build/EnglishCoach.apk"
     if not apk.is_file():
         raise SystemExit("Build frontend/android/build.sh before assembling the site.")
     target = ROOT / "dist"
@@ -25,6 +25,8 @@ def main():
         ".json": "application/json",
         ".webmanifest": "application/manifest+json",
         ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".zip": "application/zip",
         ".apk": "application/vnd.android.package-archive",
     }
     assets = {}

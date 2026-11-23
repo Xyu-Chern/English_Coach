@@ -29,8 +29,8 @@ jar cf "$tmp/classes.jar" -C "$tmp/classes" .
 sign_dir="${XDG_DATA_HOME:-$HOME/.local/share}/phrase-room"
 mkdir -p "$sign_dir"
 if [[ ! -f "$sign_dir/debug.jks" ]]; then
-  keytool -genkeypair -keystore "$sign_dir/debug.jks" -alias coach-debug -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Phrase Room Debug" >/dev/null
+  keytool -genkeypair -keystore "$sign_dir/debug.jks" -alias coach-debug -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=English Coach Debug" >/dev/null
 fi
-"$tools/apksigner" sign --ks "$sign_dir/debug.jks" --ks-pass pass:android --out "$out/PhraseRoom.apk" "$tmp/aligned.apk"
-"$tools/apksigner" verify "$out/PhraseRoom.apk"
-echo "$out/PhraseRoom.apk"
+"$tools/apksigner" sign --ks "$sign_dir/debug.jks" --ks-pass pass:android --out "$out/EnglishCoach.apk" "$tmp/aligned.apk"
+"$tools/apksigner" verify "$out/EnglishCoach.apk"
+echo "$out/EnglishCoach.apk"

@@ -35,6 +35,10 @@ LOCAL_ONLY_REQUIREMENTS = ("-r", "anthropic==", "huggingface-hub==", "faster-whi
 # The Python files the function needs beyond translation_agent_demo/ (copied whole) and its entry point
 FUNCTION_FILES = (
     "frontend/server.py",
+    "frontend/vercel/traces.py",
+    "frontend/vercel/replay.py",
+    "frontend/vercel/workflow_report.html",
+    "frontend/web/workflow.js",
     "frontend/audio_align.py",
     "frontend/staged.py",
     "frontend/request_log.py",
@@ -68,7 +72,9 @@ def audio_fields(chunk, document, audio):
     """A passage's citation audio fields: stored cue timing, else character position x episode duration
     (estimate_clip, audio_estimated=True); no known audio gives null/false."""
     row = audio.get(chunk["episode_id"])
-    url = _display_url(row["enclosure_url"]) if row and row["feed_id"] in (None, chunk["feed_id"]) else None
+    if not row or row["feed_id"] not in (None, chunk["feed_id"]):
+        row = audio.get(document.get("episode_url"))
+    url = _display_url(row["enclosure_url"]) if row else None
     if url is None:
         return NO_AUDIO.as_fields()
     lengths = [len(cue["text"]) for cue in document["cues"]]
@@ -91,7 +97,9 @@ def export_corpus(directory):
     rows = [json.loads(line) for line in psql(sql).splitlines()]
     if not rows or not all(r["approved"] for r in rows):
         raise ValueError("Snapshot failed source review")
-    audio = episode_audio()
+    # The six reviewed demo episodes use fixture IDs. Match the publisher's /play metadata by episode URL.
+    publisher_audio = json.loads(Path(__file__).with_name("snapshot_audio.json").read_text(encoding="utf8"))
+    audio = {**publisher_audio, **episode_audio()}
     directory.mkdir(exist_ok=True)
     (directory / "passages.json").write_text(
         json.dumps(
@@ -182,7 +190,7 @@ def vercel_config():
                 "includeFiles": "{" + ",".join(FUNCTION_DIRS) + "}/**",
             }
         },
-        "redirects": [{"source": "/admin", "destination": "/admin/", "permanent": False}],
+        "redirects": [{"source": "/downloads/PhraseRoom.apk", "destination": "/downloads/EnglishCoach.apk", "permanent": True}, {"source": "/admin", "destination": "/admin/", "permanent": False}],
         "rewrites": [{"source": source, "destination": "/api/search"} for source in FUNCTION_PATHS],
         "headers": [{"source": source, "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
                     for source in ADMIN_PATHS],
@@ -251,6 +259,7 @@ def main(argv=None):
     for p in (ROOT / "frontend/web").iterdir():
         if p.is_file():
             copy(p, "public/" + p.name)
+    copy(ROOT / "docs/workflow-demo/index.html", "public/workflow-demo.html")
     admin_line = stage_admin(target / "public", run=args.admin_run, results=args.admin_results,
                              tasks=args.admin_tasks, systems=args.admin_systems, coach_system=args.coach_system)
     if args.skip_search_data:
@@ -262,7 +271,7 @@ def main(argv=None):
                                  "python -m translation_agent_demo.providers.local_embeddings.")
             copy(DIRECTORY / name, "encoder/" + name)
     if args.skip_apk:
-        print("warning: no Android build; /downloads/PhraseRoom.apk is missing from this preview.", file=sys.stderr)
+        print("warning: no Android build; /downloads/EnglishCoach.apk is missing from this preview.", file=sys.stderr)
     else:
         subprocess.run(
             ["bash", "frontend/android/build.sh"],
@@ -271,8 +280,8 @@ def main(argv=None):
             check=True,
         )
         copy(
-            ROOT / "frontend/android/build/PhraseRoom.apk",
-            "public/downloads/PhraseRoom.apk",
+            ROOT / "frontend/android/build/EnglishCoach.apk",
+            "public/downloads/EnglishCoach.apk",
         )
     (target / ".vercelignore").write_text(".env*\n**/__pycache__/\n**/*.pyc\n")
     if not args.skip_search_data:

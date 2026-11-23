@@ -1,9 +1,12 @@
-const cacheName = "phrase-room-shell-v11";
+const cacheName = "phrase-room-shell-v14";
 const assets = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./cat.js",
+  "./blue-cat.svg",
+  "./workflow.js",
   "./library.json",
   "./manifest.webmanifest",
   "./icon-192.png",
@@ -13,7 +16,7 @@ self.addEventListener("install", (event) =>
   event.waitUntil(
     caches
       .open(cacheName)
-      .then((cache) => cache.addAll(assets))
+      .then((cache) => cache.addAll(assets.map((path) => new Request(path, {cache: "reload"}))))
       .then(() => self.skipWaiting()),
   ),
 );

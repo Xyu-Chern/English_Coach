@@ -1,11 +1,11 @@
 :root {
   color-scheme: light;
-  --ink: #201f34;
-  --muted: #626374;
-  --purple: #4938af;
-  --line: #dddfe3;
-  --paper: #f8f9f6;
-  --accent: #e1fa86;
+  --ink: #223449;
+  --muted: #53677b;
+  --purple: #345f8e;
+  --line: #ced9e5;
+  --paper: #f2f6fa;
+  --accent: #d1e4f6;
   font:
     16px/1.6 Inter,
     "Segoe UI",
@@ -51,7 +51,7 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 3px solid #805deb;
+  outline: 3px solid #547da8;
   outline-offset: 3px;
 }
 button {
@@ -94,7 +94,7 @@ header {
   place-items: center;
   border-radius: 10px;
   background: var(--ink);
-  color: #dcff97;
+  color: #d2e4f7;
   width: 37px;
   height: 37px;
   font:
@@ -160,7 +160,7 @@ nav a[aria-current]:after {
 .actions button:hover,
 .plain:hover,
 .icon-btn:hover {
-  background: #efedf7;
+  background: #e9eff7;
 }
 .actions button:last-child {
   border: 1px solid var(--line);
@@ -271,7 +271,7 @@ textarea::placeholder {
   color: #fff;
 }
 .primary:hover {
-  background: #44347b;
+  background: #3b5b80;
 }
 .secondary {
   background: #fff;
@@ -298,7 +298,7 @@ details > input {
   isolation: isolate;
   padding: 25px;
   color: white;
-  background: #403188;
+  background: #35597d;
   border: 0;
   display: flex;
   align-items: flex-start;
@@ -340,9 +340,9 @@ details > input {
   background: radial-gradient(
     circle,
     #262235 0 6%,
-    #dcf993 7% 55%,
-    #bccc77 56% 57%,
-    #dcf993 58%
+    #bed9f1 7% 55%,
+    #8eacc9 56% 57%,
+    #bed9f1 58%
   );
 }
 .record-art:before {
@@ -435,11 +435,11 @@ details > input {
   display: grid;
   place-items: center;
   color: #3e3560;
-  background: #e8e3fa;
+  background: #e1ebf5;
 }
 .glyph.work {
-  background: #dcece5;
-  color: #355d4c;
+  background: #e4edf5;
+  color: #365774;
 }
 .glyph.social {
   background: #f6e8cd;
@@ -512,7 +512,7 @@ details > input {
 }
 .icon-btn[aria-pressed="true"] {
   color: var(--purple);
-  background: #eeebfa;
+  background: #e4edf8;
 }
 .source {
   border-top: 1px solid var(--line);
@@ -692,7 +692,7 @@ dialog .tools {
     display: none;
   }
   nav a[aria-current] {
-    background: #f1eefb;
+    background: #e4edf8;
     border-radius: 10px;
   }
   main {
@@ -847,47 +847,72 @@ nav a svg,
   word-break: keep-all;
 }
 .method .filter[aria-pressed="true"] {
-  color: #423293;
+  color: #345a86;
   background: white;
   box-shadow: 0 1px 4px #27204720;
 }
 /* The home screen is a conversation. The tabs stay visible there so the podcast tab's badge can be seen;
    the page is a column, so the conversation fills what the header, the notice and the tabs leave. */
-.chat-home {background:#fafbf8;display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
+.chat-home {background:#f2f6fa;display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
 .chat-home header {background:transparent;border:0;max-width:1120px;width:100%;margin:0 auto;padding:0 24px}
 .chat-home main {flex:1 0 auto;display:flex;flex-direction:column;width:100%;max-width:760px;margin:0 auto;padding:0 20px 24px}
 .conversation {display:flex;flex-direction:column;gap:24px;flex:1 0 auto}
+
 .conversation.welcome {justify-content:center;padding-bottom:9vh}
 .greeting {text-align:center}
 .greeting h1 {font:650 clamp(1.65rem,4vw,2.5rem)/1.35 "Segoe UI",system-ui,sans-serif;letter-spacing:-.05em;margin:20px 0}
-.chat-form {width:100%;padding:15px;background:white;border:1px solid #d8ded5;border-radius:24px;box-shadow:0 5px 24px #23352b0b}
-.chat-form textarea {width:100%;min-height:66px;resize:vertical;background:transparent;color:#203228;border:0;box-shadow:none;padding:4px 7px;font-size:17px}
+.chat-form {width:100%;padding:15px;background:white;border:1px solid #cbd7e3;border-radius:24px;box-shadow:0 5px 24px #29446314}
+.chat-form textarea {width:100%;min-height:66px;resize:vertical;background:transparent;color:#24394f;border:0;box-shadow:none;padding:4px 7px;font-size:17px}
 .compose-actions,.waiting {display:flex;align-items:center;gap:12px}
 .compose-actions {justify-content:space-between}
-.chat-form .method {background:#f1f3ed;border-radius:24px}
-.chat-form .filter {border-radius:20px;color:#536159}
-.chat-form .filter[aria-pressed="true"] {color:#134b37;background:#fff}
-.send {border-radius:50%;width:42px;height:42px;background:#234f3f;color:white;font:600 24px/1 system-ui}
+.chat-form .method {background:#e8eef5;border-radius:24px}
+.chat-form .filter {border-radius:20px;color:#536a80}
+.chat-form .filter[aria-pressed="true"] {color:#2e5279;background:#fff}
+.send {border-radius:50%;width:42px;height:42px;background:#365e87;color:white;font:600 24px/1 system-ui}
 .with-turns {padding-top:18px}
 .with-turns .chat-form {position:sticky;bottom:max(10px,env(safe-area-inset-bottom));margin-top:auto}
 .turn-list {display:flex;flex-direction:column;gap:16px}
-.user-message {align-self:flex-end;max-width:84%;background:#e6efdf;color:#22382c;padding:10px 16px;border-radius:20px 20px 4px;overflow-wrap:anywhere;white-space:pre-wrap}
+.user-message {align-self:flex-end;max-width:84%;background:#dfeaf6;color:#243d58;padding:10px 16px;border-radius:20px 20px 4px;overflow-wrap:anywhere;white-space:pre-wrap}
 .assistant-message {overflow-wrap:anywhere}
+.workflow-action {margin:0 0 .6rem}
+.workflow-action a {display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border:1px solid #afc4d8;border-radius:9px;background:#e8f1fa;color:#2c547a;font-weight:600;text-decoration:none}
+.workflow-action a:hover,.workflow-action a:focus-visible {background:#d8e6f5;text-decoration:underline}
+.workflow-note {color:#546779;font-size:.9rem}
 .assistant-message .answer-card {border:0;background:transparent;box-shadow:none;border-radius:0;padding:10px 2px;margin:0}
-.assistant-message .answer-card + .answer-card {border-top:1px solid #dce3db}
-.mascot {position:relative;display:inline-block;width:84px;height:78px;vertical-align:middle;animation:bob 4s ease-in-out infinite}
-.mascot i {position:absolute;display:block}
-.mascot .face {inset:19px 8px 3px;background:#a9d9a8;border:3px solid #254b39;border-radius:45% 45% 39% 39%;box-shadow:inset -5px -5px #86ba93}
-.mascot .antenna {left:40px;top:7px;width:4px;height:20px;border-radius:3px;background:#294d3c;transform:rotate(10deg)}
-.antenna:before {content:"";position:absolute;top:-4px;left:-3px;width:10px;height:10px;border-radius:100%;background:#ffc75a;border:2px solid #294d3c}
-.mascot .headphones {inset:14px 3px 10px;border:5px solid #385954;border-radius:50% 50% 32% 32%}
-.eyes {top:20px;left:14px;width:6px;height:8px;border-radius:50%;background:#244839;box-shadow:25px 0 #244839;animation:blink 5.2s infinite}
-.smile {left:25px;top:28px;width:12px;height:7px;border:2px solid #345944;border-top:0;border-radius:0 0 12px 12px}
-.waiting {color:#516354}.waiting .mascot {zoom:.57;animation:bob .7s ease-in-out infinite}
-@keyframes bob {50%{transform:translateY(-5px) rotate(-3deg)}}
-@keyframes blink {0%,44%,48%,100%{transform:scaleY(1)}46%{transform:scaleY(.15)}}
-@media(max-width:640px){.chat-home header {min-height:58px;padding:0 15px}.chat-home main {padding:0 12px 12px}.chat-form textarea{font-size:16px}}
-@media(prefers-reduced-motion:reduce){.mascot,.waiting .mascot,.eyes{animation:none}}
+.assistant-message .answer-card + .answer-card {border-top:1px solid #d4dee8}
+#coach-progress {display:grid;gap:4px;color:#294969}
+#coach-progress small {color:#586c80}
+#workflow-dialog {position:fixed;inset:0;width:100%;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#eff4f9}
+#workflow-frame {width:100%;height:100%;border:0;display:block}
+/* Each fragment selects a pose in the same animated illustration. */
+.brand-group {display:flex;align-items:center;gap:6px}
+.cat-art {display:inline-block;width:var(--cat-size,64px);aspect-ratio:1;background:var(--cat-picture,url("blue-cat.svg#wave")) center/contain no-repeat;transform-origin:50% 88%;pointer-events:none;vertical-align:middle}
+#coach-pet,.greeting-cat {border:0;padding:0;background:transparent;cursor:pointer;border-radius:18px;display:inline-grid;place-items:center}
+#coach-pet {--cat-size:54px;width:54px;height:54px}
+.greeting-cat {--cat-size:clamp(116px,16vw,156px)}
+.waiting {--cat-size:68px;color:#4a617a}
+.waiting .cat-art {flex:none}
+[data-cat-activity="typing"] {--cat-picture:url("blue-cat.svg#curious")}
+[data-cat-activity="think"] {--cat-picture:url("blue-cat.svg#thinking")}
+[data-cat-activity="search"] {--cat-picture:url("blue-cat.svg#search")}
+[data-cat-activity="ready"] {--cat-picture:url("blue-cat.svg#cheer")}
+[data-cat-activity="sleep"] {--cat-picture:url("blue-cat.svg#sleep")}
+[data-cat-reaction="love"] {--cat-picture:url("blue-cat.svg#love")}
+[data-cat-reaction="fish"] {--cat-picture:url("blue-cat.svg#fish")}
+[data-cat-reaction="play"] {--cat-picture:url("blue-cat.svg#yarn")}
+#cat-dialog {width:min(340px,calc(100vw - 36px));border:1px solid #c9d9e6;border-radius:26px;padding:0;color:#203b53;background:#f9fcff;box-shadow:0 20px 75px #24445f40}
+#cat-dialog::backdrop {background:#1f344e54}
+.cat-room {padding:20px;text-align:center}
+.cat-heading {display:flex;align-items:center;justify-content:space-between}
+.cat-heading h2 {font-size:1.2rem;margin:0}
+#cat-close {border:0;background:#e8eff5;border-radius:50%;width:36px;height:36px;font-size:20px;line-height:1}
+#cat-portrait {--cat-size:155px;display:grid;place-items:center;margin:7px 0 0;min-height:178px;background:radial-gradient(ellipse at 50% 87%,#ccdde9 0%,#e5eff6 16%,transparent 46%)}
+#cat-caption {font-size:.93rem;min-height:2.8em;margin:6px 0 12px;color:#465d71}
+.cat-actions {display:flex;gap:6px}
+.cat-actions button {flex:1;border:1px solid #cbdbe8;border-radius:13px;min-height:42px;background:#eaf3fa;color:#27465f;font:inherit;font-size:.88rem}
+.cat-actions button:active {transform:scale(.95)}
+#cat-download {display:inline-block;margin-top:15px;color:#385e82;font-size:.9rem;text-underline-offset:3px}
+@media(max-width:640px){#coach-pet {--cat-size:45px;width:45px;height:45px}.chat-home header {height:58px;padding:0 15px}.chat-home main {padding:0 12px 12px}.conversation{min-height:calc(100dvh - 74px)}.chat-form textarea{font-size:16px}}
 
 /* Staged answers (D1): the notice above the chat, the empty slot under an answer, the podcast tab. */
 .sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}

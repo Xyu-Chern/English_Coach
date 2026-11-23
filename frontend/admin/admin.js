@@ -1,4 +1,4 @@
-/* Phrase Room 어드민 · 시안 B — 진입점이자 공용 코어(DOM · 형식 · 데이터 · 공용 조각 · 탭 틀 · 시작). 보기는 공개(D4).
+/* English Coach 어드민 · 시안 B — 진입점이자 공용 코어(DOM · 형식 · 데이터 · 공용 조각 · 탭 틀 · 시작). 보기는 공개(D4).
    - 같은 폴더의 data.json(계약 v1)을 상대 경로로 읽고, 서버가 있으면 requests.json · mode도 상대 경로로 읽는다.
    - 모듈(빌드 도구 · 외부 라이브러리 없음): i18n.js → admin.js → tab-flags · tab-logs · tab-metrics · tab-graph.
      탭은 render(panel)(처음 열 때 · 언어가 바뀌면 다시)과 선택적인 dyn()(폭 · 글자 크기가 바뀔 때)을 export한다.
@@ -201,7 +201,9 @@ export const LIVE = { state: "idle", rows: [], traces: {}, answers: {}, err: nul
 let liveP = null;
 export function loadLive(force = false) {
   if (force) liveP = null;
-  liveP ??= readJSON(fetch("requests.json?limit=300", { cache: "no-store" }), "requests.json").then(setLive)
+  let token;
+  try { token = sessionStorage.getItem("phrase-room-admin.token"); } catch {}
+  liveP ??= readJSON(fetch("requests.json?limit=300", { cache: "no-store", headers: token ? {"X-Admin-Token": token} : {} }), "requests.json").then(setLive)
     .catch(e => {
       Object.assign(LIVE, { state: "error", err: e }); liveP = null;
     }).then(() => LIVE);

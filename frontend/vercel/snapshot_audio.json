@@ -1,0 +1,26 @@
+{
+  "https://changelog.com/gotime/100": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/gotime/100/go-time-100.mp3",
+    "duration_s": 3979
+  },
+  "https://changelog.com/gotime/101": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/gotime/101/go-time-101.mp3",
+    "duration_s": 3422
+  },
+  "https://changelog.com/jsparty/210": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/jsparty/210/js-party-210.mp3",
+    "duration_s": 4165
+  },
+  "https://changelog.com/jsparty/211": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/jsparty/211/js-party-211.mp3",
+    "duration_s": 3314
+  },
+  "https://changelog.com/podcast/600": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/podcast/600/the-changelog-600.mp3",
+    "duration_s": 4325
+  },
+  "https://changelog.com/podcast/601": {
+    "enclosure_url": "https://op3.dev/e/https://pscrb.fm/rss/p/https://cdn.changelog.com/uploads/podcast/601/the-changelog-601.mp3",
+    "duration_s": 5970
+  }
+}

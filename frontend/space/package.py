@@ -43,7 +43,7 @@ def package():
     ):
         copy(ROOT / name, name)
     for p in (ROOT / "frontend/web").iterdir():
-        if p.suffix in (".html", ".css", ".js", ".webmanifest", ".png", ".json"):
+        if p.suffix in (".html", ".css", ".js", ".webmanifest", ".png", ".json", ".svg", ".zip"):
             copy(p, p.relative_to(ROOT))
     demo = ROOT / "translation_agent_demo"
     for directory in ("", "agents", "providers", "corpus", "storage", "tools"):

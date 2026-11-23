@@ -248,6 +248,8 @@ Contracts and decisions D8–D9 are in `design.md`; owner steps are in `frontend
 | P4 | Owner deploys our own project: login, project, Neon, secrets, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | Not started | Owner only |
 | P5 | Three-language documentation | P1–P3 | Done | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, this file |
 
+Release checks for the shared site cover staged answers, both replay languages, the blue cat, authenticated live logs and the daily limit.
+
 ## Project Owner Judgment Questions
 
 1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that any machine can package the same `/admin`? Our own package takes a prebuilt file with `--admin-data`. The detail and the recommendation are in `frontend/README.md`, judgment question 2.
@@ -511,6 +513,8 @@ flowchart LR
 | P4 | 项目负责人部署我们自己的项目：登录、创建项目、Neon、密钥、`COACH_DAILY_LIMIT=10`、`--prod` | P1–P3、G13 | 未开始 | 只能由项目负责人操作 |
 | P5 | 三语文档 | P1–P3 | 完成 | `design.md`、`frontend/README.md`、`README.md`、`translation_agent_demo/README.md` 和本文件 |
 
+共享站发布时检查分阶段回答、中韩文回放、蓝猫互动、真实日志鉴权和每日限额。
+
 ## 项目负责人判断题
 
 1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让任何机器都能打包出相同的 `/admin`？我们自己的包用 `--admin-data` 接收预先生成的文件。详情和建议见 `frontend/README.md` 判断题 2。
@@ -773,6 +777,8 @@ flowchart LR
 | P3 | 우리 Vercel 패키지: `own_snapshot align` / `package`, `own_index.py`, 승인된 청크 36,397개 전부 | A6 | 완료 | 로컬에서 빌드하고 확인: 한도 500 MB 중 약 461 MB, 배포 안 함 |
 | P4 | 책임자가 우리 프로젝트 배포: 로그인, 프로젝트 생성, Neon, 비밀값, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | 시작 전 | 책임자만 가능 |
 | P5 | 3개 언어 문서 | P1–P3 | 완료 | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, 이 파일 |
+
+공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 실제 로그 인증 및 일일 한도를 확인한다.
 
 ## 프로젝트 책임자 판단 질문
 

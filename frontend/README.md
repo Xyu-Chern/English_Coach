@@ -1,4 +1,4 @@
-# Phrase Room
+# English Coach
 
 The web client and the Android app share the files in `web/`. Search eight offline situations in Chinese, Korean or English, read the original podcast quote and its license, and keep bookmarks and recent questions on the current device. Online coaching uses the existing ExpressionCoach and the local PostgreSQL transcript index.
 
@@ -16,7 +16,7 @@ Build the Android package with Linux or WSL, JDK 17 and Android SDK Platform/Bui
 
 ```sh
 ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
-adb install -r frontend/android/build/PhraseRoom.apk
+adb install -r frontend/android/build/EnglishCoach.apk
 ```
 
 Android 1.3 uses the teammate's Vercel origin in the app. That backend bundle is generated from the repository root using `python -m frontend.vercel.package` in WSL. Set `RESPONSES_API_KEY` as a Vercel production secret before deploying the generated directory.
@@ -238,7 +238,7 @@ Android 构建需要 Linux 或 WSL、JDK 17 和 Android SDK Platform/Build Tools
 
 ```sh
 ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
-adb install -r frontend/android/build/PhraseRoom.apk
+adb install -r frontend/android/build/EnglishCoach.apk
 ```
 
 Android 1.3 直接访问队友的 Vercel，打开即可提问。更新这个后端时，从仓库根目录在 WSL 运行 `python -m frontend.vercel.package`。部署生成的目录前，在 Vercel 的生产环境配置 `RESPONSES_API_KEY`。
@@ -460,7 +460,7 @@ Android 빌드에는 Linux 또는 WSL, JDK 17, Android SDK Platform/Build Tools 
 
 ```sh
 ANDROID_HOME=/path/to/android-sdk bash frontend/android/build.sh
-adb install -r frontend/android/build/PhraseRoom.apk
+adb install -r frontend/android/build/EnglishCoach.apk
 ```
 
 Android 1.3는 팀원의 Vercel에 직접 연결한다. 이 백엔드는 WSL 저장소 루트에서 `python -m frontend.vercel.package`로 배포 파일을 만들고 Vercel 프로덕션에 `RESPONSES_API_KEY`를 설정한 뒤 배포한다.

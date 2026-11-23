@@ -90,6 +90,9 @@ class RequestLogTests(unittest.TestCase):
         with patch.dict(os.environ, {"COACH_ADMIN_TOKEN": "s3cret"}):
             client = self.app()
             self.assertTrue(client.get("/admin/mode").json()["token_required"])
+            self.assertEqual(client.get("/admin/requests.json").status_code, 401)
+            self.assertEqual(client.get("/admin/requests.json", headers={"X-Admin-Token": "wrong"}).status_code, 401)
+            self.assertEqual(client.get("/admin/requests.json", headers={"X-Admin-Token": "s3cret"}).status_code, 200)
             for headers in ({}, {"X-Admin-Token": "wrong"}):
                 refused = client.post("/admin/mode", headers=headers, json={"mode": "baseline"})
                 self.assertEqual((refused.status_code, refused.json()), (401, {"detail": "token_required"}))

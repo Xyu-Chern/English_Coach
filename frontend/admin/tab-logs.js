@@ -66,6 +66,18 @@ export async function render(panel) {
     focusSrc = wantFocus; /* 다 읽은 뒤 다시 그릴 때도 전환 버튼에 초점 */
   }
   if (live && LIVE.state !== "ok") {
+    if (LIVE.err?.params?.status === 401) {
+      const input = h("input", {type:"password", autocomplete:"off", required:true});
+      const form = h("form", h("label.field", t("mode.tokenLabel"), input), h("button", {type:"submit"}, LV("reload")));
+      form.onsubmit = e => {
+        e.preventDefault();
+        try { sessionStorage.setItem("phrase-room-admin.token", input.value.trim()); } catch {}
+        rerender("logs");
+      };
+      head(panel, form);
+      afterSrc();
+      return;
+    }
     head(panel, LIVE.state === "off"
       ? h("section.card.live-off", h("h3", icon("info"), LV("offTitle")), h("p", LV("offBody")), foot(LV("offEval")))
       : h("div.live-err", warnErr(LIVE.err, () => (focusSrc = true, rerender("logs"))), foot(LV("errHelp"))));

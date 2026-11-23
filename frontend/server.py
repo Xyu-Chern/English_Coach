@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from translation_agent_demo.agents.session import stage_observer, announce
 from frontend.audio_align import AudioAlignments
 from frontend.request_log import (MAX_LIMIT, MODE_CACHE_SECONDS, MODES, DailyLimit, ModeSwitch, RequestStore,
                                   StoreError)
@@ -84,6 +85,10 @@ class LearnerExpression(BaseModel):
     key_phrase: str | None
     note: str
     citation: SourceCitation | None
+
+
+class StageEvent(BaseModel):
+    stage: str
 
 
 class Reply(BaseModel):
@@ -243,8 +248,12 @@ class Exchange:
     quick_ms (when the quick line was) exist only for a stream: a JSON client sees nothing before total_ms."""
 
     def __init__(self, stream, question: str, mode: CoachMode, record: dict, *, clock, deadline_seconds: float,
-                 release, log, quick=None, quick_seconds: float = QUICK_SECONDS, save=None, prefetch=None):
+                 release, log, quick=None, quick_seconds: float = QUICK_SECONDS, save=None, prefetch=None,
+                 record_run=None, progress=False):
         self.clock, self.record, self.log, self._release = clock, record, log, release
+        self.record_run = record_run
+        self.progress = progress
+        self.run_id = None
         self.save, self.prefetch = save, prefetch  # save(record, result): the row; prefetch(chunk_ids): audio
         self.streaming = record["transport"] == "ndjson"
         self.started = clock()
@@ -277,11 +286,21 @@ class Exchange:
 
     def _work(self, stream, question: str, mode: CoachMode) -> None:
         events = None
+        observe = self.streaming and self.progress and self.record_run is not None
+        token = stage_observer.set((lambda stage: self.events.put(StageEvent(stage=stage))) if observe else None)
         try:
+            announce("prepare")
             events = iter(stream(question, mode, self.guard))
             for event in events:
                 if is_terminal(event):  # the coach's last step: no call follows it
                     self.release()
+                    result = getattr(event, "result", None)
+                    if self.record_run and result is not None:
+                        try:
+                            if self.record_run(result):
+                                self.run_id = str(result.request_id)
+                        except Exception:
+                            pass  # Optional telemetry cannot discard a learner's answer.
                 self.events.put(event)
                 if is_terminal(event) or self.guard.stopped:
                     break
@@ -294,6 +313,7 @@ class Exchange:
             except Exception:
                 pass
             self.release()
+            stage_observer.reset(token)
             self.events.put(_DONE)
 
     def release(self) -> None:
@@ -392,13 +412,25 @@ class Exchange:
                         continue
                     line, finished = self.fail("timeout"), True
                 else:
+                    if isinstance(event, StageEvent):
+                        yield event.model_dump_json() + "\n"
+                        continue
                     line = self.wire(event)
                     if line is None:
                         continue
                     finished = not isinstance(event, Quick) and (event is _DONE or is_terminal(event))
                 if not isinstance(line, QuickEvent):
                     self.sent = True
-                yield line.model_dump_json() + "\n"
+                payload = line.model_dump(mode="json")
+                if finished and self.progress and self.record_run:
+                    # Earlier mobile clients read the terminal answer envelope; newer ones use type.
+                    if isinstance(line, (FirstEvent, FinalEvent)):
+                        payload["run_id"] = self.run_id
+                        payload["answer"] = {"run_id": self.run_id, "expressions": payload["expressions"],
+                                             "note": line.note}
+                    elif isinstance(line, ErrorEvent):
+                        payload["error"] = line.code
+                yield json.dumps(payload, ensure_ascii=False) + "\n"
         finally:
             self.close(left=not finished)
 
@@ -527,8 +559,16 @@ def serve_live_admin(app: FastAPI, store: RequestStore, switch: ModeSwitch, fall
                 "writable": store.enabled and not mode_locked(),
                 "token_required": bool(os.environ.get("COACH_ADMIN_TOKEN", "")), "history": history}
 
+    def check_token(value: str):
+        if mode_locked():
+            refuse(403, "admin_token_required")
+        token = os.environ.get("COACH_ADMIN_TOKEN", "")
+        if token and not hmac.compare_digest(token.encode(), value.encode()):
+            refuse(401, "token_required")
+
     @app.get("/admin/requests.json", include_in_schema=False)
-    def admin_requests(limit: int = Query(300, ge=1, le=MAX_LIMIT)):
+    def admin_requests(limit: int = Query(300, ge=1, le=MAX_LIMIT), x_admin_token: str = Header(default="")):
+        check_token(x_admin_token)
         payload = {"schema_version": 1, "source": "live", "enabled": store.enabled,
                    "requests": [], "traces": {}, "answers": {}}
         if store.enabled:
@@ -547,11 +587,7 @@ def serve_live_admin(app: FastAPI, store: RequestStore, switch: ModeSwitch, fall
 
     @app.post("/admin/mode", include_in_schema=False)
     async def change_mode(request: Request, x_admin_token: str = Header(default="")):
-        if mode_locked():
-            refuse(403, "admin_token_required")
-        token = os.environ.get("COACH_ADMIN_TOKEN", "")
-        if token and not hmac.compare_digest(token.encode(), x_admin_token.encode()):
-            refuse(401, "token_required")
+        check_token(x_admin_token)
         if cross_site(request, origin):
             refuse(403, "origin_denied")
         try:
@@ -583,7 +619,7 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
              public_access=False, deadline_seconds: float = DEADLINE_SECONDS, quick_seconds: float = QUICK_SECONDS,
              log=None, clock=time.monotonic, store: RequestStore | None = None,
              mode_cache_seconds: float = MODE_CACHE_SECONDS, alignments: AudioAlignments | None = None,
-             daily: DailyLimit | None = None):
+             daily: DailyLimit | None = None, record_run=None):
     """stream(question, mode, guard) -> events (the staged coach) answers, else answer(question) -> RunResult as
     one final answer, else the local PostgreSQL index, which also gets environment_quick as quick(question) ->
     Quick | None for its streams. Read now, a wrong value stops the start: mode (CoachMode.from_environment),
@@ -612,7 +648,7 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
     origin = os.environ.get("COACH_WEB_ORIGIN", "").strip()
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", *([origin] if origin else [])],
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Coach-Code"],
-                       expose_headers=list(DAILY_HEADERS), allow_private_network=bool(origin))
+                       expose_headers=[*DAILY_HEADERS, "X-Coach-Run"], allow_private_network=bool(origin))
     slot = threading.BoundedSemaphore(1)
     limits = SessionLimits()
 
@@ -663,7 +699,8 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
         try:
             exchange = Exchange(stream, q, request_mode, record, clock=clock, deadline_seconds=deadline_seconds,
                                 release=slot.release, log=log, quick=quick, quick_seconds=quick_seconds, save=save,
-                                prefetch=alignments.prefetch if alignments.aligning else None)
+                                prefetch=alignments.prefetch if alignments.aligning else None, record_run=record_run,
+                                progress="progress=1" in accept or accept.strip() == NDJSON + ", application/json")
         except Exception:
             slot.release()
             return refused(503, "coach_unavailable", "error", quota)
@@ -678,6 +715,8 @@ def make_app(answer=None, *, stream=None, quick=None, mode: CoachMode | None = N
             return JSONResponse({"detail": "coach_unavailable"}, 503, headers=quota, background=after)
         if save:
             background.add_task(exchange.persist)
+        if exchange.run_id:
+            response.headers['X-Coach-Run'] = exchange.run_id
         response.headers.update(quota)
         return reply
 

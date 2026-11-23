@@ -56,7 +56,7 @@ class AdminSiteTests(unittest.TestCase):
                          (data.headers["content-type"], data.headers["cache-control"]))
         missing = client.get("/admin/data-traces.json")
         self.assertEqual((404, "admin_data_missing"), (missing.status_code, missing.json()["detail"]))
-        self.assertIn("Phrase Room", client.get("/").text)  # the learner app is unchanged
+        self.assertIn("English Coach", client.get("/").text)  # the learner app is unchanged
         self.assertEqual(422, client.post("/api/search", json={"question": " "}).status_code)  # the API is still there
         self.assertEqual((self.page.resolve(), self.page.resolve()),
                          tuple(p.resolve() for p in client.app.state.admin))

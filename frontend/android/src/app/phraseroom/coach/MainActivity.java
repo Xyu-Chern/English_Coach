@@ -25,6 +25,9 @@ public final class MainActivity extends Activity {
         ASSETS.put("index.html", "text/html");
         ASSETS.put("style.css", "text/css");
         ASSETS.put("app.js", "text/javascript");
+        ASSETS.put("cat.js", "text/javascript");
+        ASSETS.put("blue-cat.svg", "image/svg+xml");
+        ASSETS.put("workflow.js", "text/javascript");
         ASSETS.put("library.json", "application/json");
         ASSETS.put("manifest.webmanifest", "application/manifest+json");
         ASSETS.put("icon-192.png", "image/png");
@@ -33,7 +36,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.rgb(41,35,85));
+        getWindow().setStatusBarColor(Color.rgb(52,80,109));
         web = new WebView(this);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -57,6 +60,9 @@ public final class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri target = request.getUrl();
                 if (local(target)) return false;
+                if (!request.isForMainFrame() && "https".equals(target.getScheme())
+                        && "phrase-room-coach.vercel.app".equals(target.getHost())
+                        && "/api/search".equals(target.getPath())) return false;
                 if (request.isForMainFrame() && ("https".equals(target.getScheme()) || "http".equals(target.getScheme()))) {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, target)); }
                     catch (ActivityNotFoundException e) { Toast.makeText(MainActivity.this, target.toString(), Toast.LENGTH_LONG).show(); }

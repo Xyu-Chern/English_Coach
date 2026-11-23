@@ -1,7 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.phraseroom.coach" android:versionCode="4" android:versionName="1.3">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.phraseroom.coach" android:versionCode="8" android:versionName="1.7">
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    <application android:label="Phrase Room" android:icon="@drawable/launcher" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:label="English Coach" android:icon="@drawable/launcher" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>

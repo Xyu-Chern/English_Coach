@@ -6,21 +6,21 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#292355" />
+    <meta name="theme-color" content="#e8eff7" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Phrase Room" />
+    <meta name="apple-mobile-web-app-title" content="English Coach" />
     <link rel="icon" href="icon-192.png" />
     <link rel="apple-touch-icon" href="icon-192.png" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="style.css" />
-    <title>Phrase Room · 英语表达教练</title>
+    <title>English Coach · 英语表达教练</title>
+    <script defer src="workflow.js"></script>
+    <script defer src="cat.js"></script>
     <script defer src="app.js"></script>
   </head>
   <body>
     <header>
-      <a class="brand" href="#home" aria-label="Phrase Room"
-        ><img class="brand-logo" src="icon-192.png" alt="" />Phrase Room</a
-      >
+      <div class="brand-group"><button type="button" id="coach-pet" data-pet-open aria-haspopup="dialog" aria-label="和小蓝玩"></button><a class="brand" href="#home">English Coach</a></div>
       <nav id="nav"></nav>
       <div class="actions">
         <button id="language"></button><button id="settings"></button>
@@ -28,7 +28,16 @@
     </header>
     <div id="notice" hidden></div>
     <main id="app" tabindex="-1"></main>
+    <dialog id="cat-dialog" aria-labelledby="cat-name">
+      <div class="cat-room">
+        <div class="cat-heading"><h2 id="cat-name"></h2><button type="button" id="cat-close" aria-label="关闭">×</button></div>
+        <div id="cat-portrait"></div><p id="cat-caption" role="status"></p>
+        <div class="cat-actions"><button type="button" data-pose="love"></button><button type="button" data-pose="fish"></button><button type="button" data-pose="play"></button></div>
+        <a id="cat-download" download="English-Coach-blue-cat.zip"></a>
+      </div>
+    </dialog>
     <dialog id="dialog"></dialog>
+    <dialog id="workflow-dialog"><iframe id="workflow-frame" title="Workflow"></iframe></dialog>
     <div id="toast" role="status"></div>
     <p id="announce" class="sr-only" role="status"></p>
     <audio id="clip" preload="none"></audio>

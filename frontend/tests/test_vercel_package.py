@@ -55,9 +55,9 @@ print(json.dumps({
     "server_file": str(Path(packaged.__file__).resolve().relative_to(pkg)),
     "function_routes": sorted(getattr(r, "path", "") for r in function.routes),
     "redirect": [redirect.status_code, redirect.headers.get("location")],
-    "admin": [client.get("/admin/").status_code, "Phrase Room 어드민" in client.get("/admin/").text],
+    "admin": [client.get("/admin/").status_code, "English Coach 어드민" in client.get("/admin/").text],
     "data": [data.status_code, data.json()["meta"]["schema_version"], len(data.json()["requests"])],
-    "web": "Phrase Room" in client.get("/").text,
+    "web": "English Coach" in client.get("/").text,
     "search": client.post("/api/search", json={"question": "thanks"}).json(),
 }, ensure_ascii=False))
 """
@@ -101,7 +101,8 @@ class VercelPackageTests(unittest.TestCase):
         for absent in ("corpus", "encoder", "public/downloads", "frontend/admin"):
             self.assertFalse((self.out / absent).exists(), absent)  # the admin is not in the function's files
         config = json.loads((self.out / "vercel.json").read_text())
-        self.assertEqual([{"source": "/admin", "destination": "/admin/", "permanent": False}], config["redirects"])
+        self.assertIn({"source": "/admin", "destination": "/admin/", "permanent": False}, config["redirects"])
+        self.assertIn({"source": "/downloads/PhraseRoom.apk", "destination": "/downloads/EnglishCoach.apk", "permanent": True}, config["redirects"])
         noindex = [{"key": "X-Robots-Tag", "value": "noindex"}]
         self.assertEqual([{"source": "/admin", "headers": noindex}, {"source": "/admin/(.*)", "headers": noindex}],
                          config["headers"])

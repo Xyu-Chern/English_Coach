@@ -1,12 +1,12 @@
 ---
-title: Phrase Room
+title: English Coach
 emoji: 🎧
 colorFrom: green
 colorTo: gray
 sdk: docker
 app_port: 7860
 ---
-# Phrase Room
+# English Coach
 
 Ask for a spoken English expression or search the offline phrase collection. The coach checks podcast quotations against a bundled corpus. Transcript text is from [Changelog transcripts](https://github.com/thechangelog/transcripts), used under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Each result links to its episode. The database contains segmented and indexed transcripts. Owner setup requires the server secrets `RESPONSES_API_KEY` and `COACH_PAIR_CODE`.
 

@@ -24,6 +24,7 @@ import json
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextvars import ContextVar
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, TypeVar
@@ -43,6 +44,16 @@ T = TypeVar("T", bound=BaseModel)
 # kept so a run does not count them as infrastructure failures; anything else is model_unavailable.
 MODEL_ANSWER_ERRORS = {"model_refused", "model_output_truncated", "invalid_model_output"}
 BUDGET_ERRORS = {"model_budget_exhausted", "search_budget_exhausted"}
+
+
+stage_observer: ContextVar[Callable[[str], None] | None] = ContextVar("stage_observer", default=None)
+
+
+def announce(stage: str):
+    observer = stage_observer.get()
+    if observer is not None:
+        observer(stage)
+
 
 
 class CoachError(Exception):
@@ -112,6 +123,7 @@ class RequestSession:
     prefix: SharedPrefix | None = None  # counted in this session's result, not in its budget
 
     def __post_init__(self):
+        self.observer = stage_observer.get()
         self.started = self.deps.clock()
         self.offset_ms = self.prefix.elapsed_ms if self.prefix else 0.0  # where this session starts in the request
         self.trace: list[TraceSpan] = []
@@ -149,6 +161,8 @@ class RequestSession:
                 raise CoachError("model_budget_exhausted")
             started, position = self.deps.clock(), len(self.chat_usage)
             self.chat_usage.append(ModelUsage())
+        if self.observer:
+            self.observer(stage)
         try:
             response = self._complete(prompt, json.dumps(payload, ensure_ascii=False), response_format(schema))
             with self._lock:
@@ -216,6 +230,8 @@ class RequestSession:
             self.embedding_usage.append(None)
             waiting = self._prefetched.get(args.model_dump_json())
             prefetched = waiting.pop(0) if waiting else None
+        if self.observer:
+            self.observer(stage)
         details = {**details, "query": args.query, "key_phrase": args.literal_phrase}
         encoded = args.model_dump(mode="json")
         started, ended, result, failure = prefetched.result() if prefetched else self._call_search(args)
@@ -254,6 +270,8 @@ class RequestSession:
         """Append one trace span; started defaults to now (a zero-length step), ended to now.
 
         details.started_ms: when it started, in milliseconds since the request started (offset_ms)."""
+        if started is None and self.observer:
+            self.observer(stage)
         now = self.deps.clock() if ended is None else ended
         start = now if started is None else started
         if error:

@@ -1,12 +1,12 @@
 {
   "id": "./",
-  "name": "Phrase Room · 英语表达教练",
-  "short_name": "Phrase Room",
+  "name": "English Coach · 英语表达教练",
+  "short_name": "English Coach",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f7f8f5",
-  "theme_color": "#292355",
+  "background_color": "#f2f6fa",
+  "theme_color": "#e8eff7",
   "icons": [
     {
       "src": "icon-192.png",

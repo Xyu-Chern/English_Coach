@@ -567,6 +567,8 @@ class AudioAlignments:
     def _submit(self, chunk_id: UUID, *, priority: int, limit: int) -> bool:
         """Queue a chunk (a repeat raises its priority); True when it is queued or running."""
         with self._lock:
+            if chunk_id in self._rows:
+                return False
             state = self._state.get(chunk_id)
             if state == "running":
                 return True

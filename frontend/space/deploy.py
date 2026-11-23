@@ -66,7 +66,7 @@ def main():
     import shutil
 
     shutil.copyfile(
-        ROOT / "frontend/android/build/PhraseRoom.apk", apk_dir / "PhraseRoom.apk"
+        ROOT / "frontend/android/build/EnglishCoach.apk", apk_dir / "EnglishCoach.apk"
     )
     directory = Path.home() / ".local/share/phrase-room"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)

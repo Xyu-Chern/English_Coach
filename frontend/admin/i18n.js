@@ -1,4 +1,4 @@
-/* Phrase Room 어드민 · 화면 언어(한국어 · 中文 · English): 런타임과 사전. 다른 모듈을 import하지 않는 잎 모듈.
+/* English Coach 어드민 · 화면 언어(한국어 · 中文 · English): 런타임과 사전. 다른 모듈을 import하지 않는 잎 모듈.
    - 사전(맨 아래 DICT): 키마다 [한국어, 中文, English](중첩 경로 = 키 이름). 값은 "{name}" 자리표시 문자열, p => 문자열,
      또는 graph.*처럼 위치 인자 함수 · 배열. t(key, { n }) → 문자열, tx(key, { b: Node }) → [문자열 | Node],
      gtext("tab").node.req → graph.tab.node.req(읽는 순간의 언어). 자리표시 값이 함수면 그릴 때 호출한다.
@@ -81,8 +81,8 @@ const pl = (n, one, many = one + "s") => `${n} ${+n === 1 ? one : many}`;
 const plStr = (n, one, many) => `${n} ${String(n) === "1" ? one : many}`, s_ = n => (+n === 1 ? "" : "s"), FINAL = 4;
 const DICT = {
   app: {
-    title: ["Phrase Room 어드민", "Phrase Room 管理后台", "Phrase Room Admin"],
-    eyebrow: ["Phrase Room · 운영", "Phrase Room · 运营", "Phrase Room · Operations"],
+    title: ["English Coach 어드민", "English Coach 管理后台", "English Coach Admin"],
+    eyebrow: ["English Coach · 운영", "English Coach · 运营", "English Coach · Operations"],
     concept: ["실제 요청과 평가 실행 기록으로 모드 · 요청 · 지표 · 실행 경로를 살펴봐요", "通过真实请求和评测运行记录，查看模式、请求、指标和执行路径",
       "Explore modes, requests, metrics, and execution paths from live requests and evaluation runs"],
     skip: ["본문으로 건너뛰기", "跳到正文", "Skip to main content"], tabsLabel: ["어드민 화면", "后台页面", "Admin views"],

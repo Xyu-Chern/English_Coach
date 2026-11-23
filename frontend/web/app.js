@@ -111,6 +111,16 @@ function link(href, text) {
         "</a>"
     : "";
 }
+function replayLink(turn) {
+  if (turn.local || (turn.stage === "pending" && !turn.replayUrl)) return "";
+  if (url(turn.replayUrl)) {
+    const target = new URL(turn.replayUrl);
+    target.searchParams.set("lang", lang);
+    return '<div class="workflow-action"><a data-replay href="' + esc(target.href) + '">' +
+      T("查看本次流程", "이번 실행 과정 보기") + "</a></div>";
+  }
+  return '<p class="workflow-note">' + T("这条回答没有可用的流程链接。", "이 답변에는 실행 과정 링크가 없어요.") + "</p>";
+}
 function toast(message) {
   $("toast").textContent = message;
   clearTimeout(toast.timer);
@@ -126,8 +136,10 @@ function storeList(key, rows) {
     );
 }
 function frame(tab) {
+  $("coach-pet").setAttribute("aria-label", T("和小蓝玩", "파랑이와 놀기"));
+  setMascotActivity();
   document.documentElement.lang = lang === "ko" ? "ko" : "zh-CN";
-  document.title = "Phrase Room · " + T("英语表达教练", "영어 표현 코치");
+  document.title = "English Coach · " + T("英语表达教练", "영어 표현 코치");
   $("nav").innerHTML = [
     ["home", "home", T("练习台", "연습")],
     ["library", "library", T("表达库", "표현 모음")],
@@ -178,12 +190,31 @@ function tile(e) {
   );
 }
 const turns = [];
-function mascot(thinking = false) {
-  return (
-    '<span aria-hidden="true" class="mascot' +
-    (thinking ? " thinking" : "") +
-    '"><i class="antenna"></i><i class="headphones"></i><i class="face"><i class="eyes"></i><i class="smile"></i></i></span>'
-  );
+let progress = [];
+function progressText() {
+  if (!progress.length) return T("正在连接教练…", "코치에 연결하는 중…");
+  const current = progress[progress.length - 1];
+  const recent = progress.slice(-4, -1).map(step => workflowStage(step.stage, lang).label);
+  return '<strong>' + workflowStage(current.stage, lang).label +
+    (current.count > 1 ? ' ×' + current.count : '') + '</strong>' +
+    (recent.length ? '<small>' + recent.join(' → ') + '</small>' : '');
+}
+
+function replayUrl(runId) {
+  return /^[0-9a-f-]{36}$/i.test(runId || "") ? apiBase() + "/api/search?run_id=" + encodeURIComponent(runId) : null;
+}
+function updateProgress(stage) {
+  const last = progress[progress.length - 1];
+  if (last && workflowStage(last.stage, lang).kind === workflowStage(stage, lang).kind) last.count++;
+  else progress.push({stage, count: 1});
+  setMascotActivity();
+  const area = $("coach-progress");
+  if (area) area.innerHTML = progressText();
+}
+function setMascotActivity() {
+  const stage = progress.length && progress[progress.length - 1].stage;
+  if (pending) cat.update(stage && workflowStage(stage, lang).kind === "search" ? "search" : "think");
+  else cat.update(draft.trim() ? "typing" : turns.length && !failed ? "ready" : "idle");
 }
 function home() {
   const hasThread = turns.length || pending || failed;
@@ -195,6 +226,8 @@ function home() {
         "</div>" +
         '<div class="assistant-message">' +
         quickBubble(turn.quick, true) +
+        '<div id="replay-' + esc(turn.id) + '">' + replayLink(turn) + "</div>" +
+
         turn.expressions.map(resultCard).join("") +
         more(turn) +
         (turn.note ? "<p>" + esc(turn.note) + "</p>" : "") +
@@ -215,13 +248,11 @@ function home() {
         "</div>" +
         quickBubble(liveQuick()) +
         (pending
-          ? '<div class="waiting">' +
-            mascot(true) +
-            '<span id="wait-text">' +
-            waitText +
-            '</span><span class="wait-time" id="wait-time">' +
-            waitTime +
-            "</span></div>"
+          ? '<div class="waiting" role="status">' +
+            cat.art +
+            '<div id="coach-progress">' + progressText() + '</div>' +
+            '<span class="wait-time" id="wait-time">' + waitTime + '</span></div>'
+
           : '<div class="status error" role="alert">' +
             esc(failedMessage()) +
             " <button data-retry>" +
@@ -237,7 +268,7 @@ function home() {
     (hasThread
       ? '<div class="turn-list">' + previous + status + "</div>"
       : '<div class="greeting">' +
-        mascot() +
+        '<button type="button" class="greeting-cat" data-pet-open aria-haspopup="dialog" aria-label="' + T("和小蓝玩", "파랑이와 놀기") + '">' + cat.art + "</button>" +
         "<h1>" +
         T("今天想怎么说？", "오늘은 어떤 말을 해 볼까요?") +
         "</h1></div>") +
@@ -349,9 +380,9 @@ function startWaiting() {
   waitTick = setInterval(() => {
     const text = $("wait-text"),
       time = $("wait-time");
-    if (!text || !time) return;
+    if (!time) return;
     const [line, seconds] = waitingLine();
-    if (text.textContent !== line) text.textContent = line;
+    if (text && text.textContent !== line) text.textContent = line;
     time.textContent = seconds;
   }, 1000);
 }
@@ -1372,6 +1403,8 @@ function resultPage() {
         )) +
     "</p>" +
     quickBubble(active.quick, true) +
+    replayLink(active) +
+
     active.expressions.map(resultCard).join("") +
     (Array.isArray(active.added) && active.added.length
       ? '<h2 class="more-head">' +
@@ -1696,6 +1729,8 @@ function settle(entry, stage, added = []) {
   const page = location.hash.slice(1) || "home";
   if (["podcast", "answer", "book"].includes(page)) render();
   else {
+    const replay = $("replay-" + entry.id);
+    if (replay) replay.innerHTML = replayLink(entry);
     paintMore(entry);
     paintComposer();
     paintNav();
@@ -1732,6 +1767,11 @@ async function staged(r, req) {
   try {
     for await (const ev of ndjson(r.body)) {
       if (!ev || typeof ev !== "object") continue;
+      if (typeof ev.stage === "string") {
+        if (req.ticket === ticket && pending) updateProgress(ev.stage);
+        continue;
+      }
+      const replay = replayUrl(ev.run_id);
       if (ev.type === "quick") {
         if (!entry && !fast) fast = showQuick(req, ev);
       } else if (ev.type === "first" && !entry) {
@@ -1740,13 +1780,13 @@ async function staged(r, req) {
           req,
           expressionList(ev.expressions).filter(verified),
           ev.note,
-          extra(pendingMore ? { stage: "pending", added: [] } : {}),
+          extra({replayUrl: replay, ...(pendingMore ? {stage: "pending", added: []} : {})}),
         );
         if (!pendingMore) return;
       } else if (ev.type === "final") {
         const all = Array.isArray(ev.expressions) ? ev.expressions : [];
         if (!entry) {
-          answered(req, expressionList(all), ev.note, extra());
+          answered(req, expressionList(all), ev.note, extra({replayUrl: replay}));
           return;
         }
         const shown = new Set(entry.expressions.map(key)),
@@ -1758,6 +1798,7 @@ async function staged(r, req) {
             added.push(e);
           }
         }
+        entry.replayUrl = replay;
         settle(entry, "done", added);
         return;
       } else if (ev.type === "error") {
@@ -1803,6 +1844,7 @@ async function ask(resumeId = null, again = null) {
     context = "";
   }
   pending = true;
+  progress = [];
   active = null;
   failed = "";
   quick = null;
@@ -1817,7 +1859,7 @@ async function ask(resumeId = null, again = null) {
       });
       return;
     }
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", Accept: "application/x-ndjson, application/json" };
     const code = privateServer(apiBase()) && read("access:" + apiBase(), "");
     if (code) headers["X-Coach-Code"] = code;
     const prior = turns[turns.length - 1];
@@ -1844,7 +1886,7 @@ async function ask(resumeId = null, again = null) {
         ? null
         : await fetch(endpoint, {
             method: "POST",
-            headers: { ...headers, Accept: STREAM + ", application/json;q=0.9" },
+            headers: { ...headers, Accept: STREAM + ";progress=1, application/json;q=0.9" },
             body: JSON.stringify({ question: q, context: followup }),
             referrerPolicy: "no-referrer",
             signal: stop.signal,
@@ -1904,11 +1946,12 @@ async function ask(resumeId = null, again = null) {
       );
     const data = await r.json();
     if (!Array.isArray(data.expressions)) throw new Error("service");
+
     if (jobId)
       fetch(endpoint + "/" + jobId, { method: "DELETE", headers }).catch(
         () => {},
       );
-    answered({ q, c, sent: followup, ticket: myTicket }, data.expressions, data.note);
+    answered({ q, c, sent: followup, ticket: myTicket }, data.expressions, data.note, {replayUrl: replayUrl(data.run_id || r.headers.get("X-Coach-Run"))});
   } catch (err) {
     if (ticket === myTicket)
       failed =
@@ -1964,7 +2007,7 @@ function settings() {
       ? ""
       : '<div class="source"><h3>' +
         T("手机 App", "모바일 앱") +
-        '</h3><a href="./downloads/PhraseRoom.apk" download>Android APK</a><p class="compact">' +
+        '</h3><a href="./downloads/EnglishCoach.apk" download>Android APK</a><p class="compact">' +
         T(
           "iPhone 可在 Safari 的分享菜单中选择「添加到主屏幕」。",
           "iPhone에서는 Safari 공유 메뉴에서 ‘홈 화면에 추가’를 선택하세요.",
@@ -1998,7 +2041,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("input", (ev) => {
-  if (ev.target.id === "question") draft = ev.target.value;
+  if (ev.target.id === "question") { draft = ev.target.value; setMascotActivity(); }
   if (ev.target.id === "context") context = ev.target.value;
   if (ev.target.id === "query") {
     searchText = ev.target.value;
@@ -2041,6 +2084,18 @@ document.addEventListener("submit", (e) => {
   }
 });
 document.addEventListener("click", (e) => {
+  const replay = e.target.closest("a[data-replay]");
+  if (replay && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    window.history.pushState({workflow: true}, "", location.href);
+    const frame = document.createElement("iframe");
+    frame.id = "workflow-frame";
+    frame.title = T("工作流回放", "실행 과정 다시 보기");
+    frame.src = replay.href;
+    $("workflow-dialog").replaceChildren(frame);
+    $("workflow-dialog").showModal();
+    return;
+  }
   if (e.target.closest("[data-dismiss]")) closeSettings();
   const b = e.target.closest("button");
   if (!b) return;
@@ -2118,6 +2173,36 @@ document.addEventListener("click", (e) => {
     render();
   }
 });
+function closeReplay() {
+  if (!$("workflow-dialog").open) return;
+  dismissReplay();
+  if (window.history.state?.workflow) window.history.back();
+}
+function dismissReplay() {
+  $("workflow-dialog").close();
+  $("workflow-dialog").replaceChildren();
+  if (location.hash === "#answer") go("home");
+  render();
+  $("question")?.focus({preventScroll: true});
+}
+$("workflow-dialog").addEventListener("cancel", e => {e.preventDefault(); closeReplay()});
+window.addEventListener("message", e => {
+  const frame = $("workflow-frame");
+  if (!frame || e.source !== frame.contentWindow || !frame.hasAttribute("src") ||
+      e.origin !== new URL(frame.src).origin) return;
+  if (e.data?.action === "continue-coaching") {
+    if (["ko", "zh"].includes(e.data.lang)) {
+      lang = e.data.lang;
+      write("language", lang);
+    }
+    closeReplay();
+  }
+});
+window.addEventListener("popstate", () => {
+  if ($("workflow-dialog").open && !window.history.state?.workflow) {
+    dismissReplay();
+  }
+});
 window.addEventListener("hashchange", () => {
   if (clip) shutClip(); // the card with the player leaves the screen
   readPhoneLink();
@@ -2136,6 +2221,13 @@ function readPhoneLink() {
   }
 }
 async function start() {
+  cat.bind();
+  if (location.hash === "#continue") {
+    const preferred = new URLSearchParams(location.search).get("lang");
+    if (["ko","zh"].includes(preferred)) { lang = preferred; write("language", lang); }
+    mode = "coach";
+    window.history.replaceState(null, "", location.pathname + "#home");
+  }
   readPhoneLink();
   // Phones show the tabs fixed at the bottom; the page keeps their real height free (large text wraps them).
   if ("ResizeObserver" in window)
