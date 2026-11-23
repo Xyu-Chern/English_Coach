@@ -1988,6 +1988,8 @@ function settings() {
     T("表达库", "표현 모음") +
     '</a><a href="#book" data-dismiss>' +
     T("学习本", "학습 노트") +
+    (isAndroid ? "" : '</a><a href="./admin/evaluation/report.pdf">' +
+      T("评测报告（PDF）", "평가 보고서 (PDF)")) +
     '</a></div><label class="field">' +
     T("教练服务地址", "코치 서버 주소") +
     '<input type="url" id="server" value="' +

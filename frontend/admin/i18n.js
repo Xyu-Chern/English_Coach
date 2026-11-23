@@ -81,6 +81,8 @@ const pl = (n, one, many = one + "s") => `${n} ${+n === 1 ? one : many}`;
 const plStr = (n, one, many) => `${n} ${String(n) === "1" ? one : many}`, s_ = n => (+n === 1 ? "" : "s"), FINAL = 4;
 const DICT = {
   app: {
+    evalPdf: ["중국어 50문항 평가 보고서 (PDF)", "中文 50 题评测报告（PDF）", "Chinese 50-task report (PDF)"],
+    evalReplay: ["중국어·한국어 평가 비교 및 리플레이", "中韩评测对照与逐题回放", "Chinese and Korean results and replays"],
     title: ["English Coach 어드민", "English Coach 管理后台", "English Coach Admin"],
     eyebrow: ["English Coach · 운영", "English Coach · 运营", "English Coach · Operations"],
     concept: ["실제 요청과 평가 실행 기록으로 모드 · 요청 · 지표 · 실행 경로를 살펴봐요", "通过真实请求和评测运行记录，查看模式、请求、指标和执行路径",

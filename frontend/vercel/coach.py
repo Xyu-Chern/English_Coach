@@ -30,7 +30,9 @@ class _Published(BaseModel):
 class PublishedCorpus:
     """passages.json from frontend.vercel.package; hits of an older snapshot without audio fields have no audio."""
 
-    def __init__(self, directory=DATA):
+    def __init__(self, directory=None):
+        if directory is None:
+            directory = DATA
         # One pass from the JSON text to the records, without a dict per hit first: a 36k-passage snapshot then
         # peaks near its final size instead of about twice it (Vercel's function has 2 GB).
         packed = directory / "passages.json.gz"  # own_snapshot.py gzips it; frontend.vercel.package writes plain JSON

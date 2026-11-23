@@ -52,7 +52,7 @@ client = TestClient(app, base_url="https://coach.example")
 redirect = client.get("/admin", follow_redirects=False)
 data = client.get("/admin/data.json")
 print(json.dumps({
-    "server_file": str(Path(packaged.__file__).resolve().relative_to(pkg)),
+    "server_file": Path(packaged.__file__).resolve().relative_to(pkg).as_posix(),
     "function_routes": sorted(getattr(r, "path", "") for r in function.routes),
     "redirect": [redirect.status_code, redirect.headers.get("location")],
     "admin": [client.get("/admin/").status_code, "English Coach 어드민" in client.get("/admin/").text],
@@ -455,7 +455,7 @@ class OwnPackageTests(unittest.TestCase):
         result = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual("frontend/server.py", result["server_file"])
         self.assertEqual(["anthropic", "claude-haiku-5-5", "local"], result["settings"])
-        self.assertTrue(result["encoder_dir"].endswith("/encoder"))
+        self.assertEqual("encoder", Path(result["encoder_dir"]).name)
         self.assertIn("/api/search", result["routes"])
         self.assertEqual([200, "ready", "asr", 200_000], result["alignment"])
         self.assertEqual([200, "unavailable"], result["not_aligned"])
@@ -475,7 +475,7 @@ client = TestClient(app, base_url="https://coach.example")
 ready = client.get("/api/audio/alignment", params={"chunk_id": sys.argv[1], "quote": "that is"})
 other = client.get("/api/audio/alignment", params={"chunk_id": "00000000-0000-0000-0000-000000000002", "quote": "x"})
 print(json.dumps({
-    "server_file": str(Path(packaged.__file__).resolve().relative_to(pkg)),
+    "server_file": Path(packaged.__file__).resolve().relative_to(pkg).as_posix(),
     "settings": [os.environ["LLM_PROVIDER"], os.environ["LLM_MODEL"], os.environ["EMBEDDING_PROVIDER"]],
     "encoder_dir": os.environ["COACH_LOCAL_MODEL_DIR"],
     "routes": sorted(getattr(r, "path", "") for r in app.routes),

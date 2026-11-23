@@ -30,17 +30,19 @@ class _Published(BaseModel):
 class PublishedCorpus:
     """passages.json from frontend.vercel.package; hits of an older snapshot without audio fields have no audio."""
 
-    def __init__(self):
+    def __init__(self, directory=None):
+        if directory is None:
+            directory = DATA
         # One pass from the JSON text to the records, without a dict per hit first: a 36k-passage snapshot then
         # peaks near its final size instead of about twice it (Vercel's function has 2 GB).
-        packed = DATA / "passages.json.gz"  # own_snapshot.py gzips it; frontend.vercel.package writes plain JSON
-        raw = gzip.decompress(packed.read_bytes()) if packed.is_file() else (DATA / "passages.json").read_bytes()
+        packed = directory / "passages.json.gz"  # own_snapshot.py gzips it; frontend.vercel.package writes plain JSON
+        raw = gzip.decompress(packed.read_bytes()) if packed.is_file() else (directory / "passages.json").read_bytes()
         payload = _Published.model_validate_json(raw)
         self.profile = payload.profile
         self.hits = payload.hits
         # Narrower vectors (own_snapshot.py: float16, MiniLM's 384) omit the encoder's zero padding to the profile's
         # width; search reads only that many query columns, which gives the padded cosine.
-        vectors = np.asarray(np.load(DATA / "vectors.npy", allow_pickle=False), dtype=np.float32)
+        vectors = np.asarray(np.load(directory / "vectors.npy", allow_pickle=False), dtype=np.float32)
         if vectors.ndim != 2 or vectors.shape[0] != len(self.hits) or not 0 < vectors.shape[1] <= self.profile["dimensions"]:
             raise ValueError("Unexpected published vector shape")
         self.vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)

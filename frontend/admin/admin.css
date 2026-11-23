@@ -648,3 +648,6 @@ body[data-w=s] .top-side, body[data-w=m] .top-side { align-items: flex-start }
 .lang-sw { align-items: center; padding: .15rem .2rem .15rem .55rem }
 .lang-sw .lang-ic { color: var(--muted); margin-right: .1rem }
 .lang-sw button { font-family: var(--font-sans); min-height: 1.9rem; padding: .15rem .6rem }
+
+.eval-links { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; margin: 1rem 0; }
+.eval-links a { color: #245486; text-underline-offset: .2em; }

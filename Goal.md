@@ -250,6 +250,8 @@ Contracts and decisions D8–D9 are in `design.md`; owner steps are in `frontend
 
 Release checks for the shared site cover staged answers, both replay languages, the blue cat, open live logs with a token-guarded mode switch, and the daily limit.
 
+The Chinese 50-task evaluation is complete. The admin dashboard uses all 300 paired attempts. The report and both cohort replays are available from the dashboard.
+
 ## Project Owner Judgment Questions
 
 1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that any machine can package the same `/admin`? Our own package takes a prebuilt file with `--admin-data`. The detail and the recommendation are in `frontend/README.md`, judgment question 2.
@@ -515,6 +517,8 @@ flowchart LR
 
 共享站发布时检查分阶段回答、中韩文回放、蓝猫互动、无需令牌的真实日志与需令牌的模式切换，以及每日限额。
 
+中文 50 题评测已完成。管理后台使用两种系统的全部 300 次作答，并提供报告和中韩两组回放。
+
 ## 项目负责人判断题
 
 1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让任何机器都能打包出相同的 `/admin`？我们自己的包用 `--admin-data` 接收预先生成的文件。详情和建议见 `frontend/README.md` 判断题 2。
@@ -779,6 +783,8 @@ flowchart LR
 | P5 | 3개 언어 문서 | P1–P3 | 완료 | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, 이 파일 |
 
 공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 토큰 없는 실제 로그 조회와 토큰이 필요한 모드 전환, 일일 한도를 확인한다.
+
+중국어 50문항 평가를 완료했습니다. 관리 화면에서 두 시스템의 전체 300회 시도, 보고서 및 두 평가 세트의 리플레이를 확인할 수 있습니다.
 
 ## 프로젝트 책임자 판단 질문
 
