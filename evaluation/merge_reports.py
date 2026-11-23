@@ -6,6 +6,7 @@ from html import escape
 import json
 from pathlib import Path
 
+from .report import mean, nearest_rank, num
 from .tasks import DATA, load_tasks
 
 
@@ -38,7 +39,12 @@ def metrics(rows):
     passes = Counter()
     for row in rows:
         passes[row["task_id"]] += int(row["passed"])
-    return {"tasks": len(passes), "attempts": len(rows), "passed_attempts": sum(passes.values()),
+    latency = [r["latency_ms"] / 1000 for r in rows if r.get("latency_ms") is not None]
+    passed = sum(passes.values())
+    return {"tasks": len(passes), "attempts": len(rows), "passed_attempts": passed,
+            "accuracy": passed / len(rows), "turns_mean": mean(r.get("model_calls") for r in rows),
+            "latency_mean_s": mean(latency), "latency_p95_s": nearest_rank(latency, 0.95),
+            "tokens_mean": mean(r.get("tokens") for r in rows),
             "pass@3": sum(n >= 1 for n in passes.values()), "pass^3": sum(n == 3 for n in passes.values()),
             "flips": sorted(task for task, n in passes.items() if n in (1, 2))}
 
@@ -62,11 +68,15 @@ def merge(korean, chinese, output):
                                                      ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "attempts.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                                            encoding="utf-8")
-    table = []
+    table, performance = [], []
     for name, systems in summary.items():
         for system, m in systems.items():
-            table.append(f"<tr><td>{name}</td><td>{system}</td><td>{m['passed_attempts']}/{m['attempts']}</td>"
+            table.append(f"<tr><td>{name}</td><td>{system}</td><td>{m['accuracy']:.1%} "
+                         f"({m['passed_attempts']}/{m['attempts']})</td>"
                          f"<td>{m['pass@3']}/{m['tasks']}</td><td>{m['pass^3']}/{m['tasks']}</td></tr>")
+            performance.append(f"<tr><td>{name}</td><td>{system}</td><td>{num(m['turns_mean'], '.2f')}</td>"
+                               f"<td>{num(m['latency_mean_s'], '.1f')}</td><td>{num(m['latency_p95_s'], '.1f')}</td>"
+                               f"<td>{num(m['tokens_mean'], ',.0f')}</td></tr>")
     links = []
     for name, _, report in cohorts:
         local_review = output / ("ko.html" if name == "Korean set" else "zh.html")
@@ -83,8 +93,11 @@ th,td{text-align:left;padding:.55em;border-bottom:1px solid #d6e0ea}a{color:#175
 <h1>English Coach · 100 tasks</h1><p>Each system answered each task three times.
 The combined counts describe two experiments with different agent policies, models, judges and corpora.
 Compare the two systems within each set.</p>
-<table><tr><th>Set</th><th>System</th><th>Passing attempts</th><th>At least once</th><th>All three</th></tr>"""
-    (output / "index.html").write_text(page + "".join(table) + "</table>" + "".join(links), encoding="utf-8")
+<table><tr><th>Set</th><th>System</th><th>Accuracy</th><th>pass@3 · at least once</th><th>pass^3 · all three</th></tr>"""
+    efficiency = """<h2>Performance per attempt</h2><table><tr><th>Set</th><th>System</th>
+<th>Mean model calls</th><th>Mean latency (s)</th><th>p95 latency (s)</th><th>Mean tokens</th></tr>"""
+    (output / "index.html").write_text(page + "".join(table) + "</table>" + efficiency + "".join(performance)
+                                       + "</table>" + "".join(links), encoding="utf-8")
 
 
 if __name__ == "__main__":
