@@ -90,9 +90,7 @@ class RequestLogTests(unittest.TestCase):
         with patch.dict(os.environ, {"COACH_ADMIN_TOKEN": "s3cret"}):
             client = self.app()
             self.assertTrue(client.get("/admin/mode").json()["token_required"])
-            self.assertEqual(client.get("/admin/requests.json").status_code, 401)
-            self.assertEqual(client.get("/admin/requests.json", headers={"X-Admin-Token": "wrong"}).status_code, 401)
-            self.assertEqual(client.get("/admin/requests.json", headers={"X-Admin-Token": "s3cret"}).status_code, 200)
+            self.assertEqual(client.get("/admin/requests.json").status_code, 200)  # viewing stays open (D4)
             for headers in ({}, {"X-Admin-Token": "wrong"}):
                 refused = client.post("/admin/mode", headers=headers, json={"mode": "baseline"})
                 self.assertEqual((refused.status_code, refused.json()), (401, {"detail": "token_required"}))
@@ -202,6 +200,7 @@ class RequestLogTests(unittest.TestCase):
             client = self.app()
             self.assertEqual((client.get("/admin/mode").json()["writable"], client.get("/admin/mode").json()
                               ["token_required"]), (False, False))
+            self.assertEqual(client.get("/admin/requests.json").status_code, 200)  # only the switch is locked
             for headers in ({}, {"X-Admin-Token": "anything"}):
                 refused = client.post("/admin/mode", headers=headers, json={"mode": "baseline"})
                 self.assertEqual((refused.status_code, refused.json()), (403, {"detail": "admin_token_required"}))

@@ -13,9 +13,9 @@ COACH_DAILY_LIMIT caps the requests of a day for everyone (frontend/request_log.
 request that got the slot, before any model call; over the cap 429 daily_limit, no countable database 503
 daily_limit_unavailable; X-Coach-Daily-Limit / -Remaining headers. Each request past the access checks is one
 log line and, with a database (frontend/request_log.py), one row after the response. GET /admin/ serves the
-admin page and data.json; GET /admin/requests.json, GET/POST /admin/mode (X-Admin-Token when COACH_ADMIN_TOKEN
-is set; on Vercel, without it, no change at all) read the request log and switch the mode (DB > COACH_SYSTEM >
-agent, cached 10 s).
+admin page and data.json; GET /admin/requests.json and GET /admin/mode read the request log and the mode (open,
+D4); POST /admin/mode switches it (DB > COACH_SYSTEM > agent, cached 10 s; X-Admin-Token when COACH_ADMIN_TOKEN
+is set; on Vercel, without it, no change at all).
 """
 import argparse
 import asyncio
@@ -567,8 +567,7 @@ def serve_live_admin(app: FastAPI, store: RequestStore, switch: ModeSwitch, fall
             refuse(401, "token_required")
 
     @app.get("/admin/requests.json", include_in_schema=False)
-    def admin_requests(limit: int = Query(300, ge=1, le=MAX_LIMIT), x_admin_token: str = Header(default="")):
-        check_token(x_admin_token)
+    def admin_requests(limit: int = Query(300, ge=1, le=MAX_LIMIT)):  # viewing stays open (D4)
         payload = {"schema_version": 1, "source": "live", "enabled": store.enabled,
                    "requests": [], "traces": {}, "answers": {}}
         if store.enabled:

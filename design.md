@@ -397,7 +397,7 @@ Done in this change, not deferred:
 - The public `/api/search` has no per-IP rate limit; the daily cap is the only spend bound.
 - `AGENTS.md` still describes the first translation slice and a first release with accounts; the owner kept it unchanged. The decision log records the current scope and the D2/D4 exception.
 
-On the shared production site, the blue cat follows real stage events. A finished answer links to its Chinese or Korean replay only after its metrics are stored. The public admin dashboard shows evaluation data. Live learner logs and mode changes require the production admin token.
+On the shared production site, the blue cat follows real stage events. A finished answer links to its Chinese or Korean replay only after its metrics are stored. The public admin dashboard shows evaluation data and live request logs without a token. Only mode changes require the production admin token.
 
 ## 11. Project Owner Judgment Questions
 
@@ -816,7 +816,7 @@ D1–D6 于 2026-11-21 确定。2026-11-22 修订了 D5、完成了 D6，并新�
 - 公开的 `/api/search` 没有按 IP 的频率限制；每日上限是唯一的花费上限。
 - `AGENTS.md` 仍描述最初的翻译切片和带账户的第一版；项目负责人决定不修改它。决定记录写明当前范围和 D2/D4 例外。
 
-共享正式站的蓝猫随实际运行阶段切换动作。一次回答的指标写入成功后，学习者可以查看中文或韩文流程回放。公开管理页展示评测数据，读取真实学习者日志和切换模式均需生产管理员令牌。
+共享正式站的蓝猫随实际运行阶段切换动作。一次回答的指标写入成功后，学习者可以查看中文或韩文流程回放。公开管理页无需令牌即可查看评测数据和真实请求日志，只有切换模式需要生产管理员令牌。
 
 ## 11. 项目负责人判断题
 
@@ -1235,7 +1235,7 @@ D1–D6은 2026-11-21에 확정했다. 2026-11-22에 D5를 개정하고 D6을 �
 - 공개 `/api/search`에는 IP별 요청 제한이 없다. 비용 상한은 일일 상한뿐이다.
 - `AGENTS.md`는 여전히 첫 번역 슬라이스와 계정이 있는 첫 릴리스를 설명하지만 책임자가 그대로 두었다. 현재 범위와 D2/D4 예외는 결정 기록에 있다.
 
-공용 운영 사이트의 파란 고양이는 실제 처리 단계에 맞춰 움직인다. 실행 지표가 저장되면 답변에서 한국어 또는 중국어로 과정을 다시 볼 수 있다. 공개 관리 화면은 평가 데이터를 보여 주며 실제 학습자 로그 조회와 모드 변경에는 운영 관리자 토큰이 필요하다.
+공용 운영 사이트의 파란 고양이는 실제 처리 단계에 맞춰 움직인다. 실행 지표가 저장되면 답변에서 한국어 또는 중국어로 과정을 다시 볼 수 있다. 공개 관리 화면은 평가 데이터와 실제 요청 로그를 토큰 없이 보여 주며, 모드 변경에만 운영 관리자 토큰이 필요하다.
 
 ## 11. 프로젝트 책임자 판단 질문
 

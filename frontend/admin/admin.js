@@ -201,9 +201,7 @@ export const LIVE = { state: "idle", rows: [], traces: {}, answers: {}, err: nul
 let liveP = null;
 export function loadLive(force = false) {
   if (force) liveP = null;
-  let token;
-  try { token = sessionStorage.getItem("phrase-room-admin.token"); } catch {}
-  liveP ??= readJSON(fetch("requests.json?limit=300", { cache: "no-store", headers: token ? {"X-Admin-Token": token} : {} }), "requests.json").then(setLive)
+  liveP ??= readJSON(fetch("requests.json?limit=300", { cache: "no-store" }), "requests.json").then(setLive)
     .catch(e => {
       Object.assign(LIVE, { state: "error", err: e }); liveP = null;
     }).then(() => LIVE);

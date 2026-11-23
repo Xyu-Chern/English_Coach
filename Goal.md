@@ -248,7 +248,7 @@ Contracts and decisions D8–D9 are in `design.md`; owner steps are in `frontend
 | P4 | Owner deploys our own project: login, project, Neon, secrets, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | Not started | Owner only |
 | P5 | Three-language documentation | P1–P3 | Done | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, this file |
 
-Release checks for the shared site cover staged answers, both replay languages, the blue cat, authenticated live logs and the daily limit.
+Release checks for the shared site cover staged answers, both replay languages, the blue cat, open live logs with a token-guarded mode switch, and the daily limit.
 
 ## Project Owner Judgment Questions
 
@@ -513,7 +513,7 @@ flowchart LR
 | P4 | 项目负责人部署我们自己的项目：登录、创建项目、Neon、密钥、`COACH_DAILY_LIMIT=10`、`--prod` | P1–P3、G13 | 未开始 | 只能由项目负责人操作 |
 | P5 | 三语文档 | P1–P3 | 完成 | `design.md`、`frontend/README.md`、`README.md`、`translation_agent_demo/README.md` 和本文件 |
 
-共享站发布时检查分阶段回答、中韩文回放、蓝猫互动、真实日志鉴权和每日限额。
+共享站发布时检查分阶段回答、中韩文回放、蓝猫互动、无需令牌的真实日志与需令牌的模式切换，以及每日限额。
 
 ## 项目负责人判断题
 
@@ -778,7 +778,7 @@ flowchart LR
 | P4 | 책임자가 우리 프로젝트 배포: 로그인, 프로젝트 생성, Neon, 비밀값, `COACH_DAILY_LIMIT=10`, `--prod` | P1–P3, G13 | 시작 전 | 책임자만 가능 |
 | P5 | 3개 언어 문서 | P1–P3 | 완료 | `design.md`, `frontend/README.md`, `README.md`, `translation_agent_demo/README.md`, 이 파일 |
 
-공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 실제 로그 인증 및 일일 한도를 확인한다.
+공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 토큰 없는 실제 로그 조회와 토큰이 필요한 모드 전환, 일일 한도를 확인한다.
 
 ## 프로젝트 책임자 판단 질문
 
