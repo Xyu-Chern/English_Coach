@@ -25,7 +25,6 @@ continue if the code, tasks, models or corpus changed, or if a unit started with
 every system: its paid outcome is unknown, so it is never silently repeated.
 """
 
-import fcntl
 import hashlib
 import json
 import os
@@ -52,7 +51,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SYSTEMS = tuple(CODE_SYSTEMS)  # ("baseline", "agent"), in the order results are reported
 # Every file that can change an answer or its cost; a run refuses to resume if any of them changed.
 # The coach's modules are listed recursively: its systems, tools, prompts and schemas live in subpackages.
-SOURCES = sorted([*(str(p.relative_to(ROOT)) for p in (ROOT / "translation_agent_demo/agents").rglob("*.py")),
+SOURCES = sorted([*(p.relative_to(ROOT).as_posix() for p in (ROOT / "translation_agent_demo/agents").rglob("*.py")),
                   *(f"evaluation/{name}.py" for name in ("runner", "live", "snapshot_search", "snapshot_store",
                                                          "recording", "freeze", "tasks", "costs")),
                   "evaluation/data/tasks.jsonl", "evaluation/data/pricing.json", "translation_agent_demo/config.py",
@@ -131,8 +130,18 @@ class Runner:
     def prepare(self) -> None:
         """Create the run directory and lock it; refuse if an existing run had a different manifest."""
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self._lock = (self.run_dir / ".lock").open("w")
-        fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self._lock = (self.run_dir / ".lock").open("a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self._lock.seek(0)
+                msvcrt.locking(self._lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.close()
+            raise
         path = self.run_dir / "manifest.json"
         if path.exists():
             if _checked(json.loads(path.read_text())) != _checked(self.manifest):

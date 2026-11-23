@@ -91,7 +91,10 @@ def run(run_dir: Path, tasks: list[EvalTask], *, repeats: int, workers: int, max
     from .live import LiveEnvironment
     from .runner import PairAttempt, RunPlan, Runner, git_state
 
-    environment = environment or LiveEnvironment()
+    if environment is None:
+        from .published import configured_bundle, PublishedEnvironment
+        bundle = configured_bundle()
+        environment = PublishedEnvironment(bundle) if bundle else LiveEnvironment()
     systems = systems or select_systems(None)
     git, diff = git_state()
     plan = RunPlan(tasks, repeats=repeats, workers=workers)
@@ -119,8 +122,12 @@ def grade(run_dir: Path, workers: int, prepare_only: bool, corpus: Corpus | None
 
     tasks = {t.id: t for t in planned_tasks(run_dir)}
     if corpus is None:
-        corpus = Corpus(configured_snapshot_dir() / "corpus.json.gz")
         manifest = json.loads((run_dir / "manifest.json").read_text())
+        if manifest["environment"].get("snapshot_schema") == "published_bundle":
+            from .published import configured_bundle, grading_corpus
+            corpus = grading_corpus(configured_bundle())
+        else:
+            corpus = Corpus(configured_snapshot_dir() / "corpus.json.gz")
         if corpus.sha256 != manifest["environment"]["corpus_sha256"]:
             raise SystemExit("The selected corpus differs from the snapshot used for this run.")
     settings = None if prepare_only else Settings.from_environment()  # only a judge call needs the chat settings
