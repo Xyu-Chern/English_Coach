@@ -56,7 +56,9 @@ def merge(korean, chinese, output):
                                  (name == "Combined" or r["cohort"] == name)])
                       for s in ("agent", "baseline")} for name in (*info, "Combined")}
     output.mkdir(parents=True, exist_ok=True)
-    (output / "results.json").write_text(json.dumps({"source_runs": info, "summary": summary},
+    policies = {"Korean set": "Submission agent can revise previously verified examples.",
+                "Chinese set": "Current agent keeps verified examples and can fill remaining slots."}
+    (output / "results.json").write_text(json.dumps({"source_runs": info, "agent_policies": policies, "summary": summary},
                                                      ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "attempts.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                                            encoding="utf-8")
@@ -72,14 +74,15 @@ def merge(korean, chinese, output):
         run = info[name]
         links.append(f'<p><a href="{local_review.name}">{name} · replay 50 tasks</a><br>'
                      f'Model {escape(run["model"])} · Judge {escape(run["judge"]["model"])} · '
-                     f'Corpus {escape(run["snapshot"])}</p>')
+                     f'Corpus {escape(run["snapshot"])}<br>{escape(policies[name])}</p>')
     page = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport"
 content="width=device-width,initial-scale=1"><title>English Coach · 100 tasks</title>
 <style>body{font:17px/1.55 system-ui;background:#f4f7fa;color:#1f3042;max-width:920px;
 margin:6vh auto;padding:0 16px}table{border-collapse:collapse;width:100%;background:white}
 th,td{text-align:left;padding:.55em;border-bottom:1px solid #d6e0ea}a{color:#175597}</style>
 <h1>English Coach · 100 tasks</h1><p>Each system answered each task three times.
-The combined counts describe two experiments with different models, judges and corpora.</p>
+The combined counts describe two experiments with different agent policies, models, judges and corpora.
+Compare the two systems within each set.</p>
 <table><tr><th>Set</th><th>System</th><th>Passing attempts</th><th>At least once</th><th>All three</th></tr>"""
     (output / "index.html").write_text(page + "".join(table) + "</table>" + "".join(links), encoding="utf-8")
 
