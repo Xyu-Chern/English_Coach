@@ -1,6 +1,7 @@
 """Read the small published transcript snapshot from the function bundle."""
 
 from functools import lru_cache
+import gzip
 from pathlib import Path
 import re
 
@@ -32,7 +33,9 @@ class PublishedCorpus:
     def __init__(self):
         # One pass from the JSON text to the records, without a dict per hit first: a 36k-passage snapshot then
         # peaks near its final size instead of about twice it (Vercel's function has 2 GB).
-        payload = _Published.model_validate_json((DATA / "passages.json").read_bytes())
+        packed = DATA / "passages.json.gz"  # own_snapshot.py gzips it; frontend.vercel.package writes plain JSON
+        raw = gzip.decompress(packed.read_bytes()) if packed.is_file() else (DATA / "passages.json").read_bytes()
+        payload = _Published.model_validate_json(raw)
         self.profile = payload.profile
         self.hits = payload.hits
         # Narrower vectors (own_snapshot.py: float16, MiniLM's 384) omit the encoder's zero padding to the profile's

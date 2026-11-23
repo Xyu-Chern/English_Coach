@@ -429,7 +429,7 @@ class OwnPackageTests(unittest.TestCase):
             self.assertNotIn(absent, requirements)
         self.assertEqual(package.vercel_config(), json.loads((self.out / "vercel.json").read_text()))
         self.assertEqual(300, package.vercel_config()["functions"]["api/search.py"]["maxDuration"])
-        for name in (*package.FUNCTION_FILES, "corpus/passages.json", "corpus/vectors.npy", "corpus/alignments.json",
+        for name in (*package.FUNCTION_FILES, "corpus/passages.json.gz", "corpus/vectors.npy", "corpus/alignments.json",
                      "encoder/tokenizer.json", "encoder/onnx/model.onnx", "public/index.html",
                      "public/admin/index.html", "public/admin/data.json", ".python-version", ".vercelignore"):
             self.assertTrue((self.out / name).is_file(), name)

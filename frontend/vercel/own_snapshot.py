@@ -2,7 +2,7 @@
 
 The corpus is the approved Changelog-family chunks of the active local corpus build (DATABASE_URL in
 translation_agent_demo/.env), in the files coach.PublishedCorpus reads:
-- corpus/passages.json: CorpusSearchHit records with attribution, license and audio fields (stored cue timing, else
+- corpus/passages.json.gz: gzipped CorpusSearchHit records with attribution, license and audio fields (stored cue timing, else
   interpolated between the transcript's time markers, else character position x episode duration)
 - corpus/vectors.npy: the chunk texts embedded with the deploy's own MiniLM encoder, float16 at 384 dimensions
   (coach.py treats the missing columns as the encoder's zero padding to 1536)
@@ -18,6 +18,7 @@ are exported. Over the size budget, whole episodes are kept: the most cited in -
 import argparse
 from collections import Counter
 from dataclasses import replace
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -340,9 +341,11 @@ def embed(texts, encoder=None, cache: Path | None = None, log=print, workers: in
 
 def write_corpus(directory: Path, profile: dict, hits, vectors, alignments, manifest) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    for name in ("passages.json", "vectors.npy", "alignments.json", "manifest.json"):
+    for name in ("passages.json", "passages.json.gz", "vectors.npy", "alignments.json", "manifest.json"):
         (directory / name).unlink(missing_ok=True)
-    (directory / "passages.json").write_text(compact({"profile": profile, "hits": list(hits)}), encoding="utf8")
+    # Gzipped: the full snapshot's JSON is over the 100 MB a Vercel CLI upload allows per file.
+    text = compact({"profile": profile, "hits": list(hits)}).encode("utf8")
+    (directory / "passages.json.gz").write_bytes(gzip.compress(text, mtime=0))
     np.save(directory / "vectors.npy", np.asarray(vectors, dtype=np.float16), allow_pickle=False)
     (directory / "alignments.json").write_text(compact({"alignments": alignments}), encoding="utf8")
     (directory / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf8")
