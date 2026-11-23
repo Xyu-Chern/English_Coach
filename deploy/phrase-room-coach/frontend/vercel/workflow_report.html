@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>English Coach · 单次运行回放</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#202c3c;font:15px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+header{background:#172d3a;color:#fff;padding:15px 3.4%;display:flex;align-items:center;gap:14px}header strong{letter-spacing:-.5px;font-size:22px}
+header small{margin-left:auto;color:#b4d7cb}.badge{border:1px solid #496474;color:#d4e6ee;padding:2px 10px;border-radius:20px;font-size:12px}
+main{max-width:1650px;margin:auto;padding:23px 3.4% 32px}.meta{color:#536674;font-size:13px}.mono{font-family:Consolas,monospace}
+h1{font-size:clamp(22px,2.1vw,34px);line-height:1.4;letter-spacing:-.8px;margin:7px 0 20px}h2{font-size:18px;margin:0}h3{font-size:19px;margin:0 0 8px;line-height:1.35}
+.grid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(305px,1fr);gap:16px;align-items:start}
+section,aside{background:#fff;border:1px solid #dce3e8;border-radius:13px;padding:19px 21px;margin:0 0 15px}
+.heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}
+.flow{display:flex;align-items:stretch;gap:18px;flex-wrap:wrap}.node{position:relative;flex:1 1 88px;min-width:0;background:var(--soft);border:1px solid var(--tone);border-radius:8px;padding:10px 8px;text-align:left;color:#23303e;font:inherit;cursor:pointer}.node b{display:block;font-size:15px}.node small{display:block;font-size:12px;margin-top:4px}.node:not(:last-child)::after{content:'›';color:#8696a3;font:24px Georgia;position:absolute;right:-15px;top:25%}
+.model{--tone:#7560aa;--soft:#f2eef9}.search{--tone:#4c82a2;--soft:#eaf4fa}.verify{--tone:#6486a4;--soft:#e8f0f8}.output{--tone:#526478;--soft:#ecf0f3}.extra{--tone:#93612f;--soft:#f8efe6}.failed{--tone:#b34b48;--soft:#fbe8e8}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);background:#e8f0f8;border-radius:10px;padding:12px 8px;margin:0 0 16px}.metrics div{padding:0 13px;border-right:1px solid #d4dfe2}.metrics div:last-child{border:0}.metrics small{display:block;color:#51616c}.metrics strong{font-size:23px;letter-spacing:-1px}
+.lane,.axis{display:grid;grid-template-columns:84px 1fr;align-items:center;min-height:37px}.lane>span,.axis>span{font-size:13px;color:#4a5b67}.track,.ticks{position:relative;height:35px;border-bottom:1px solid #e4e8ec;background:repeating-linear-gradient(90deg,#e3e8eb 0 1px,transparent 1px 25%)}.ticks{background:none;border:0;height:24px;font:12px Consolas,monospace;color:#52616e}.ticks i{position:absolute;font-style:normal;transform:translateX(-50%)}.ticks i:first-child{transform:none}.ticks i:last-child{transform:translateX(-100%)}
+.bar{position:absolute;height:16px;top:9px;border:1px solid var(--tone);background:var(--soft);border-radius:3px;min-width:3px;padding:0;cursor:pointer}.bar.mark{height:9px;min-width:9px;width:9px!important;transform:translateX(-90%) rotate(45deg);top:13px;background:var(--tone)}button.active{outline:2px solid #35597d;outline-offset:1px}
+#detail{margin:16px 0 0;padding:10px 13px;background:#f0f5f6;border-radius:5px;font-size:14px}.expr{border-top:1px solid #dce4e9;padding:14px 0 8px}.expr:first-of-type{border:0}.quote{margin:10px 0 5px;border-left:3px solid #6486a4;padding-left:12px;color:#344e4e;font:16px/1.4 Georgia,serif}.expr a{font-size:12px;color:#30665e}aside .heading{margin-bottom:5px}ol{list-style:none;padding:0;margin:0;columns:2;column-gap:24px}li{break-inside:avoid}li button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;border-bottom:1px solid #eef1f3;padding:5px 0;cursor:pointer;color:inherit;text-align:left}li i{width:8px;height:8px;background:var(--tone);border-radius:2px}li em{margin-left:auto;font:12px Consolas,monospace;color:#4a5967}footer{margin-top:8px;color:#546878;font-size:12px}
+@media(max-width:950px){.grid{grid-template-columns:1fr}.flow{gap:12px}.node:not(:last-child)::after{display:none}}
+@media(max-width:600px){.metrics div{padding:0 6px}.metrics strong{font-size:17px}.flow{display:grid;grid-template-columns:1fr 1fr}ol{columns:1}main{padding:16px}section,aside{padding:15px}.grid{display:block}}
+
+header{background:#edf3fa;color:#223c59;border-bottom:1px solid #c7d5e4;flex-wrap:wrap}
+header .badge{color:#385775;border-color:#b6c8db}header nav{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px}
+header a,header button,#play{display:inline-flex;align-items:center;justify-content:center;color:#284e75;border:1px solid #acbfd3;background:#fff;border-radius:9px;min-height:40px;padding:4px 12px;font:inherit;text-decoration:none;cursor:pointer}
+header a{font-weight:650;background:#dce9f7}.heading{flex-wrap:wrap}.model{--tone:#597ca4;--soft:#e9f1fa}.extra{--tone:#697a93;--soft:#eff1f6}.verify{--tone:#486984;--soft:#dce9f4}
+#detail{min-height:48px;background:#edf3f9}.quote{color:#354f67}.expr a{color:#305778}.node.active{background:#d3e6fb}
+.select,.prepare,.decline,.budget{--tone:#5d7c98;--soft:#e6eff9}.playing .node.active b{animation:hop .8s ease-in-out infinite}@keyframes hop{50%{transform:translateY(-4px)}}
+button:focus-visible,a:focus-visible{outline:3px solid #366998;outline-offset:2px}
+@media(max-width:600px){header{gap:8px}header nav{width:100%;margin:0}.metrics{grid-template-columns:1fr 1fr;row-gap:10px}.metrics div:nth-child(2){border:0}footer{overflow-wrap:anywhere}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+</style>
+<header><strong>English Coach</strong><span class="badge" id="badge"></span><nav><a id="back" href="https://phrase-room-coach.vercel.app/#continue"></a><button id="language" type="button"></button><button id="share" type="button" hidden></button></nav></header>
+<main><div class="meta" id="stamp"></div><h1 id="question"></h1><div class="grid"><div>
+<div class="metrics" id="metrics"></div>
+<section><div class="heading"><h2 id="path-title"></h2><span id="variant" class="meta"></span><button id="play" type="button"></button></div><div class="flow" id="flow"></div></section>
+<section><div class="heading"><h2 id="timeline-title"></h2><small class="meta" id="legend"></small></div><div id="lanes"></div><p id="detail" aria-live="polite"></p></section>
+<section><div class="heading"><h2 id="steps-title"></h2></div><ol id="events"></ol></section></div>
+<aside><div class="heading"><h2 id="result-title"></h2><span class="meta" id="verified"></span></div><div id="answers"></div></aside></div><footer id="origin"></footer></main>
+<script type="application/json" id="run">__RUN_JSON__</script>
+<script>__WORKFLOW_JS__</script>
+<script>
+const $ = id => document.getElementById(id);
+const run = JSON.parse($('run').textContent);
+const m = run.metrics, steps = m.steps;
+const pageUrl = new URL(location.href);
+let stored;
+try { stored = JSON.parse(localStorage.getItem('phrase-room.language')); } catch {}
+let lang = pageUrl.searchParams.get('lang') || stored || 'zh';
+const t = (zh, ko) => lang === 'ko' ? ko : zh;
+const seconds = ms => (ms / 1000).toFixed(2) + t(' 秒','초');
+const when = new Date(run.recorded_at);
+function add(parent, tag, text='', cls='') {
+  const item = document.createElement(tag);
+  item.textContent = text;
+  item.className = cls;
+  parent.append(item);
+  return item;
+}
+const info = step => workflowStage(step.stage, lang);
+let chosen = 0, timer = null;
+function stop() {
+  clearInterval(timer);
+  timer = null;
+  document.body.classList.remove('playing');
+  $('play').textContent = t('▶ 快速回放','▶ 빠르게 다시 보기');
+}
+function select(i) {
+  chosen = i;
+  const s = steps[i];
+  const details = [info(s).label, t('开始于 ','시작 ') + seconds(s.start_ms), t('用时 ','소요 ') + seconds(s.elapsed_ms)];
+  if (s.hit_count != null) details.push(t('找到 '+s.hit_count+' 段字幕','자막 '+s.hit_count+'개 찾음'));
+  if (s.verified != null) details.push(t('核实 '+s.verified+' 条','예문 '+s.verified+'개 확인'));
+  if (s.skipped) details.push(t('已跳过','건너뜀'));
+  if (s.status === 'error') details.push(t('失败','실패'));
+  $('detail').textContent = details.join(' · ');
+  document.querySelectorAll('[data-step]').forEach(n => n.classList.toggle('active',
+    +n.dataset.step <= i && i <= +(n.dataset.end || n.dataset.step)));
+}
+function attach(button,index,last=index) {
+  button.dataset.step=index; button.dataset.end=last;
+  button.title=info(steps[index]).label+' · '+steps[index].stage;
+  button.setAttribute('aria-label',button.title);
+  button.onclick=()=>{stop();select(index)};
+}
+function render() {
+  stop();
+  document.documentElement.lang=t('zh-CN','ko');
+  document.title = 'English Coach · '+t('工作流回放','실행 과정 다시 보기');
+  $('badge').textContent=t('工作流回放','실행 과정 다시 보기');
+  $('back').textContent=t('← 返回继续提问','← 돌아가서 질문하기');
+  $('back').href='https://phrase-room-coach.vercel.app/?lang='+lang+'#continue';
+  $('language').textContent=t('한국어','中文');
+  $('share').textContent=t('复制分享链接','공유 링크 복사');
+  $('share').hidden=location.protocol!=='https:';
+  $('stamp').textContent=when.toLocaleString(document.documentElement.lang,{timeZoneName:'short'});
+  $('question').textContent=run.question||t('这次教练做了什么？','코치는 어떻게 답했을까요?');
+  $('path-title').textContent=t('执行顺序','진행 순서');
+  $('variant').textContent=(m.variant==='agent'?t('智能体','에이전트'):m.variant)+' · '+(m.status==='ok'?t('完成','완료'):t('失败','실패'));
+  $('timeline-title').textContent=t('每一步花了多久','단계별 소요 시간');
+  $('legend').textContent=t('◆ 一瞬间完成的步骤','◆ 바로 끝난 단계');
+  $('steps-title').textContent=t('逐步查看','단계별로 보기');
+  $('result-title').textContent=run.response?t('教练回答','코치의 답변'):t('运行结果','실행 결과');
+  $('verified').textContent=t('例句已核实 ','확인된 예문 ')+m.verified+' / '+m.expressions;
+  $('origin').textContent=t('运行编号 ','실행 ID ')+run.id;
+  for(const id of ['metrics','flow','lanes','events','answers']) $(id).replaceChildren();
+  const tokens=m.usage.input_tokens==null||m.usage.output_tokens==null?t('未报告','정보 없음'):(m.usage.input_tokens+m.usage.output_tokens).toLocaleString();
+  for(const [label,value] of [[t('总用时','전체 소요 시간'),seconds(m.elapsed_ms)],[t('模型调用','모델 호출'),m.model_rounds],[t('字幕检索','자막 검색'),m.searches],[t('模型 Token','모델 토큰'),tokens]]){
+    const item=add($('metrics'),'div');add(item,'small',label);add(item,'strong',value);
+  }
+  const groups=[];
+  steps.forEach((step,i)=>{
+    const {kind,label}=info(step);
+    if(groups.at(-1)?.kind!==kind)groups.push({kind,label,first:i,last:i,ms:0});
+    const g=groups.at(-1);g.last=i;g.ms+=step.elapsed_ms;
+  });
+  for(const g of groups){
+    const n=add($('flow'),'button','','node '+g.kind);add(n,'b',g.label);add(n,'small',seconds(g.ms));attach(n,g.first,g.last);
+  }
+  const ax=add($('lanes'),'div','','axis');add(ax,'span',t('经过时间','경과 시간'));
+  const ticks=add(ax,'div','','ticks');
+  for(let i=0;i<5;i++)add(ticks,'i',(m.elapsed_ms*i/4000).toFixed(1)+'s').style.left=i*25+'%';
+  const tracks=new Map(), total=Math.max(1,m.elapsed_ms);
+  steps.forEach((s,i)=>{
+    const {kind,label}=info(s);
+    if(!tracks.has(kind)){const row=add($('lanes'),'div','','lane');add(row,'span',label);tracks.set(kind,add(row,'div','','track'))}
+    const bar=add(tracks.get(kind),'button','','bar '+(s.status==='error'?'failed':kind)+(s.elapsed_ms===0?' mark':''));
+    bar.style.left=Math.min(100,100*s.start_ms/total)+'%';bar.style.width=s.elapsed_ms/total*100+'%';attach(bar,i);
+    const btn=add(add($('events'),'li'),'button','',kind);add(btn,'i');add(btn,'span',label);add(btn,'em',seconds(s.elapsed_ms));attach(btn,i);
+  });
+  $('play').disabled=!steps.length;
+  if(steps.length)select(Math.min(chosen,steps.length-1));
+  for(const expr of run.response?.expressions||[]){
+    const card=add($('answers'),'article','','expr');add(card,'h3',expr.expression);
+    if(expr.citation){add(card,'p','“'+expr.citation.quote+'”','quote');const a=add(card,'a',expr.citation.episode_title+' ↗');if(/^https?:\/\//.test(expr.citation.episode_url||''))a.href=expr.citation.episode_url;}
+    else add(card,'small',t('没有已核实的播客引文','확인된 팟캐스트 인용문이 없어요'),'meta');
+  }
+  if(!$('answers').children.length)add($('answers'),'p',m.status==='ok'?(run.response?.note||t('返回 '+m.expressions+' 个表达，其中 '+m.verified+' 个带有已核实的播客原句。','표현 '+m.expressions+'개 중 '+m.verified+'개에 확인된 팟캐스트 예문이 있어요.')):t('这次未能生成回答。','이번에는 답변을 만들지 못했어요.'));
+}
+$('language').onclick=()=>{
+  lang=t('ko','zh');pageUrl.searchParams.set('lang',lang);
+  if(location.protocol==='https:')history.replaceState(null,'',pageUrl);
+  try{localStorage.setItem('phrase-room.language',JSON.stringify(lang))}catch{}
+  render();
+};
+$('back').onclick=e=>{
+  if(window.parent!==window){e.preventDefault();parent.postMessage({action:'continue-coaching',lang},'*')}
+};
+$('play').onclick=()=>{
+  if(timer){stop();return}
+  select(0);document.body.classList.add('playing');$('play').textContent=t('暂停','일시 정지');
+  timer=setInterval(()=>{if(chosen+1>=steps.length){stop();return}select(chosen+1)},800);
+};
+$('share').onclick=async()=>{
+  try{await navigator.clipboard.writeText(pageUrl.href);$('share').textContent=t('已复制','복사했어요')}
+  catch{window.prompt(t('复制回放链接','링크를 복사하세요'),pageUrl.href)}
+};
+render();
+</script></html>

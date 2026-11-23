@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" aria-label="Blue cat">
+  <style>
+    .kitten {stroke:#304763;stroke-width:3.1;stroke-linejoin:round;stroke-linecap:round;fill:#9bc6ec}
+    .tail {transform-origin:107px 120px;animation:tail 2.4s ease-in-out infinite}
+    .head {transform-origin:76px 91px}
+    .eyes {transform-origin:77px 74px;animation:blink 2.4s linear infinite}
+    .arm {transform-origin:51px 106px;animation:wave 2.4s ease-in-out infinite}
+    .prop,.soft-eyes,.nap-eyes,.snack-mouth {display:none}
+    #curious:target ~ .kitten .head,#thinking:target ~ .kitten .head {animation:tilt 2.4s ease-in-out infinite}
+    #thinking:target ~ .kitten .arm {animation:ponder 2.4s ease-in-out infinite}
+    #search:target ~ .kitten .lens,#love:target ~ .kitten .heart,#fish:target ~ .kitten .fish,#yarn:target ~ .kitten .yarn,#cheer:target ~ .kitten .spark {display:inline}
+    #love:target ~ .kitten .soft-eyes,#cheer:target ~ .kitten .soft-eyes,#sleep:target ~ .kitten .nap-eyes,#fish:target ~ .kitten .snack-mouth {display:inline}
+    #love:target ~ .kitten .eyes,#cheer:target ~ .kitten .eyes,#sleep:target ~ .kitten .eyes,#fish:target ~ .kitten .mouth {display:none}
+    #love:target ~ .kitten .head {animation:nuzzle 2.4s ease-in-out infinite}
+    #search:target ~ .kitten .head {animation:scan 2.4s ease-in-out infinite}
+    #fish:target ~ .kitten .head {animation:nibble 2.4s ease-in-out infinite}
+    #fish:target ~ .kitten .snack-mouth {transform-origin:80px 87px;animation:chew 2.4s ease-in-out infinite}
+    #love:target ~ .kitten .heart,#cheer:target ~ .kitten .spark {animation:float 2.4s ease-in-out infinite}
+    #cheer:target ~ .kitten {transform-origin:80px 133px;animation:jump 2.4s ease-in-out infinite}
+    #yarn:target ~ .kitten .yarn {transform-origin:31px 127px;animation:roll 2.4s ease-in-out infinite}
+    #yarn:target ~ .kitten .arm {animation:bat 2.4s ease-in-out infinite}
+    #sleep:target ~ .kitten .arm,#curious:target ~ .kitten .arm,#search:target ~ .kitten .arm,#fish:target ~ .kitten .arm {animation:none}
+    #sleep:target ~ .kitten .head {animation:doze 2.4s ease-in-out infinite}
+    #sleep:target ~ .kitten .tail {animation-name:sleep-tail}
+    @keyframes tail {0%,100%{transform:rotate(-8deg)}50%{transform:rotate(10deg)}}
+    @keyframes sleep-tail {50%{transform:rotate(4deg)}}
+    @keyframes blink {0%,66%,78%,100%{transform:scaleY(1)}72%{transform:scaleY(.10)}}
+    @keyframes wave {0%,60%,100%{transform:rotate(0)}22%{transform:rotate(20deg)}40%{transform:rotate(-9deg)}}
+    @keyframes tilt {50%{transform:rotate(9deg)}}
+    @keyframes ponder {50%{transform:translate(3px,-3px) rotate(19deg)}}
+    @keyframes scan {50%{transform:translateX(5px) rotate(4deg)}}
+    @keyframes nuzzle {25%{transform:rotate(-6deg)}75%{transform:rotate(6deg)}}
+    @keyframes nibble {25%,65%{transform:translateY(3px) rotate(2deg)}}
+    @keyframes chew {25%,65%{transform:scaleY(.3)}}
+    @keyframes roll {50%{transform:translateX(-9px) rotate(-40deg)}}
+    @keyframes bat {34%,78%{transform:translate(-5px,5px) rotate(-28deg)}}
+    @keyframes doze {0%,100%{transform:translateY(4px) rotate(-8deg)}50%{transform:translateY(6px) rotate(-10deg)}}
+    @keyframes float {50%{transform:translateY(-4px)}}
+    @keyframes jump {0%,65%,100%{transform:none}19%{transform:scale(1.035,.95)}39%{transform:translateY(-8px)}}
+    @media(prefers-reduced-motion:reduce){svg .kitten,svg .kitten * {animation:none!important}}
+  </style>
+  <g id="wave"/><g id="curious"/><g id="thinking"/><g id="search"/><g id="cheer"/><g id="love"/><g id="fish"/><g id="yarn"/><g id="sleep"/>
+  <g class="kitten">
+    <path class="tail" d="M105 119Q127 123 126 102C125 90 136 88 139 99C146 124 126 140 103 133Z"/>
+    <path d="M49 93Q41 103 43 122Q43 135 56 135H100Q114 135 111 122Q110 103 101 94Z"/>
+    <path fill="#f5f6ef" stroke="none" d="M56 123C56 100 93 98 97 125Q90 131 77 131Q62 131 56 123Z"/>
+    <path d="M54 129q5-4 12 0m20 0q5-4 12 0" fill="none"/>
+    <g class="head">
+      <path d="M35 63L35 32Q35 25 41 28L61 40Q78 34 94 40L113 28Q119 25 119 32L117 62Q125 77 116 89Q107 102 77 102Q46 102 36 89Q27 76 35 63Z"/>
+      <path d="M37 43V32Q37 28 40 30L51 36Z" fill="#466688" stroke="none"/>
+      <path d="M105 41l9-8-1 13Z" fill="#efd2ce" stroke="none"/>
+      <path d="M61 85Q63 77 72 79Q78 81 82 79Q93 76 96 86Q96 95 79 96Q61 95 61 85Z" fill="#f7f6ee" stroke="none"/>
+      <g class="eyes" fill="#293d54" stroke="none"><ellipse cx="58" cy="72" rx="3.8" ry="5.3"/><ellipse cx="96" cy="72" rx="3.8" ry="5.3"/></g>
+      <path class="soft-eyes" d="M53 74q5-9 10-1m28 0q5-8 10 0" fill="none"/>
+      <path class="nap-eyes" d="M53 73q5 5 10 0m28 0q5 5 10 0" fill="none"/>
+      <path d="M74 80q4-2 8 0l-4 4Z" fill="#304763" stroke-width="1"/>
+      <path class="mouth" d="M78 84q-2 5-6 2m6-2q2 5 6 2" fill="none" stroke-width="1.8"/>
+      <ellipse class="snack-mouth" cx="79" cy="87" rx="3.3" ry="2.6" fill="#c8797e" stroke-width="1"/>
+      <path d="M32 76l10 2m69 0 11-3" fill="none" stroke-width="2"/>
+      <g class="prop lens"><path d="M107 84l9 11" stroke-width="5"/><circle cx="98" cy="72" r="15" fill="#dceeff" fill-opacity=".45" stroke-width="4.5"/></g>
+    </g>
+    <path class="arm" d="M54 107Q46 109 42 101L39 94C37 88 43 85 47 90L55 98"/>
+    <g class="prop fish" fill="#edb377"><path d="M65 105q10-13 23-4l8-5-1 12-8-3q-12 9-22 0Z"/><circle cx="72" cy="103" r="1.2" fill="#304763" stroke="none"/></g>
+    <path class="prop heart" d="M124 47C111 39 119 30 124 36C132 29 138 38 124 47Z" fill="#e6a0ab" stroke-width="2"/>
+    <path class="prop spark" d="M129 40l2 7 7 2-7 3-2 7-3-7-6-3 6-2Z" fill="#f2c87b" stroke-width="1.8"/>
+    <g class="prop yarn" fill="#dda4b4" stroke-width="2.4"><circle cx="31" cy="127" r="11"/><path d="M22 124q10-3 16-4m-16 10q11-2 18-6m-14 11q8-2 13-6" fill="none" stroke="#aa7289" stroke-width="1.7"/></g>
+  </g>
+</svg>
