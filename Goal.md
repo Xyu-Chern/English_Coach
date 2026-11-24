@@ -257,6 +257,17 @@ Release checks for the shared site cover staged answers, both replay languages, 
 
 The admin evaluation page covers all 200 tasks and 1,200 graded answers. Each task links to its three paired attempts. The page includes the English PDF and results by cohort.
 
+### Tabbed technical guide diagrams (2026-11-24)
+
+| Task | Dependency | Status | Acceptance |
+|---|---|---|---|
+| Inspect deployed Run graph, Swimlanes and `docs/how-it-works.html` against code | — | Done | Read the paired `zh-train-door / 1` traces and current code |
+| Add overall architecture, mode diagrams and linked trace/time views in three languages | Inspection | Done | One standalone `english-coach-guide.html`; preserve other topics |
+| Verify render, keyboard navigation and offline operation | Diagrams | Done | 24 tab views; linked replay in all languages; 1440px/390px; offline; no JS errors |
+| Add concrete tool, corpus, retrieval and grading examples | Verify code/traces → measure local retrieval → render three languages | Done | Real repick/lock examples, MiniLM scores, worked grading and Q&A; 24 offline views, example/deep-link controls and 1440px/390px layouts verified without JS errors |
+| Add exact LLM prompts and tool contracts | Inspect prompts, schemas and recorded decisions → embed in guide → verify three languages | Done | 11 prompt originals match source in EN/ZH/KO; 3 tool schemas, recorded decisions and separate grading; 27 offline topic views and all prompt controls verified at 1440px/390px, no JS errors; safety instruction-text gap disclosed |
+| Restore presentation and narration in the guide | Recover embedded plans → pair with eight slide previews → verify languages and playback | Done | 8 pages × 3 languages; slides 1–7 match saved scripts, slide 8 completion labeled; embedded previews/demo, keyboard controls and pause-on-leave verified offline at desktop/mobile sizes; existing source deck unchanged |
+
 ## Project Owner Judgment Questions
 
 1. **Admin data in git (blocks G8):** commit `frontend/admin/data.json` built from the D6 run, so that any machine can package the same `/admin`? Our own package takes a prebuilt file with `--admin-data`. The detail and the recommendation are in `frontend/README.md`, judgment question 2.
@@ -529,6 +540,17 @@ flowchart LR
 
 管理后台评测页收录全部 200 道题和 1,200 份已评分的回答。每道题都可以回放三轮配对作答，并可查阅分组成绩和英文 PDF。
 
+### 分标签技术指南图解（2026-11-24）
+
+| 任务 | 依赖 | 状态 | 验收 |
+|---|---|---|---|
+| 对照代码查看线上执行图、泳道及 `docs/how-it-works.html` | — | 完成 | 已读取 `zh-train-door / 1` 对照轨迹与当前代码 |
+| 添加三语整体架构、两种模式图解及联动的执行轨迹与时间轴 | 核对 | 完成 | 单个 `english-coach-guide.html`，保留其他主题 |
+| 验证渲染、键盘操作和离线运行 | 图解 | 完成 | 24 个标签视图、三语联动回放、1440px/390px、离线、无 JS 错误 |
+| 补充工具、语料、检索与判分的具体案例 | 核对代码与轨迹 → 本地检索测量 → 三语渲染 | 完成 | 真实 repick/锁定案例、MiniLM 分数、逐项判分与答辩；24 个离线视图、案例切换与章节链接、1440px/390px 布局均验证，无 JS 错误 |
+| 补充完整 LLM 提示词与工具契约 | 核对提示词、Schema 和决策记录 → 加入指南 → 三语验证 | 完成 | 11 条提示词三语原文与代码一致；3 个工具 Schema、真实决策及独立评审；27 个离线视图、提示词控件与 1440px/390px 布局验证，无 JS 错误；明确安全评审指令原文缺失 |
+| 在指南中恢复演示资料与讲稿 | 提取已有计划 → 配对八页预览 → 验证语言与播放 | 完成 | 8 页 × 3 语言；1–7 页与原稿一致，第 8 页补写有标识；内嵌预览/演示、键盘及离页暂停通过离线桌面/移动验证；原幻灯片未改动 |
+
 ## 项目负责人判断题
 
 1. **把管理页数据放进 git（阻塞 G8）：** 是否提交由 D6 运行生成的 `frontend/admin/data.json`，让任何机器都能打包出相同的 `/admin`？我们自己的包用 `--admin-data` 接收预先生成的文件。详情和建议见 `frontend/README.md` 判断题 2。
@@ -800,6 +822,17 @@ flowchart LR
 공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 토큰 없는 실제 로그 조회와 토큰이 필요한 모드 전환, 일일 한도를 확인한다.
 
 관리 화면의 평가 페이지는 전체 200문항과 채점된 답변 1,200개를 다룹니다. 문항별로 두 시스템의 세 번의 응답을 다시 볼 수 있으며, 평가 세트별 성적과 영문 PDF도 확인할 수 있습니다.
+
+### 탭형 기술 가이드 도식 (2026-11-24)
+
+| 작업 | 의존 항목 | 상태 | 검수 기준 |
+|---|---|---|---|
+| 배포 Run graph·Swimlanes와 `docs/how-it-works.html`을 코드와 대조 | — | 완료 | `zh-train-door / 1` 비교 트레이스와 현재 코드 확인 |
+| 전체 아키텍처, 두 모드 도식, 연결된 트레이스·시간축을 3개 언어로 추가 | 대조 | 완료 | 단일 `english-coach-guide.html`, 나머지 주제 유지 |
+| 렌더링·키보드·오프라인 확인 | 도식 | 완료 | 24개 탭, 3개 언어 리플레이 연동, 1440px/390px, 오프라인, JS 오류 없음 |
+| 도구·코퍼스·검색·채점의 구체적 예시 추가 | 코드·트레이스 확인 → 로컬 검색 측정 → 3개 언어 렌더링 | 완료 | 실제 repick·잠금 사례, MiniLM 점수, 쌍별 채점·Q&A; 오프라인 24개 화면, 예시 전환·바로가기, 1440px/390px 배치 검증 및 JS 오류 없음 |
+| LLM 프롬프트 원문과 도구 계약 추가 | 프롬프트·스키마·결정 기록 확인 → 가이드 반영 → 3개 언어 검증 | 완료 | 프롬프트 11개 × 3개 언어 원문 일치; 도구 스키마 3개·실제 판단·별도 채점; 오프라인 27개 화면·프롬프트 조작·1440px/390px 배치 검증 및 JS 오류 없음; 안전성 지시문 원문 누락 명시 |
+| 가이드에 발표자료·대본 복원 | 남은 계획 추출 → 8장 미리보기와 연결 → 언어·재생 검증 | 완료 | 8장 × 3개 언어; 1–7장 원문 일치, 8장 보완 표시; 미리보기·데모 내장, 키보드·장 이동 시 일시정지와 데스크톱/모바일 오프라인 검증; 원본 발표자료 유지 |
 
 ## 프로젝트 책임자 판단 질문
 
