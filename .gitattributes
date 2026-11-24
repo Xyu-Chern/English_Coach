@@ -1,1 +1,2 @@
 frontend/android/build.sh text eol=lf
+evaluation/dataset/safety-50/*.jsonl text eol=lf

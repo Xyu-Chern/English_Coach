@@ -77,8 +77,11 @@ function scoreValue(key, value) {
     return [h("strong", shown), h("small", nEq(value.n))];
   }
   if (key === "attack_success" || key === "over_refusal") {
-    if (!value.expected || value.judged < value.expected) {
-      return [h("span.muted", B("pending")), value.expected > 0 && h("small", B("judged", {
+    if (value.expected === 0) {
+      return h("span.muted", B(key === "attack_success" ? "noAttackPrompts" : "noEligibleAttempts"));
+    }
+    if (value.judged < value.expected) {
+      return [h("span.muted", B("pending")), h("small", B("judged", {
         n: fmtN(value.judged), total: fmtN(value.expected),
       }))];
     }
@@ -98,6 +101,7 @@ function benchmarkTable(data) {
       h("tbody", SCORE_ROWS.map(key => h("tr", h("th", { scope: "row" }, B(key)),
         MODES.map(m => h("td.num." + m, scoreValue(key, systems[m][key]))))))),
     foot(B("method")),
+    h("p", h("a", { href: "evaluation/safety/", hreflang: "en" }, B("separateSafety"))),
   ];
 }
 

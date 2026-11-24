@@ -88,6 +88,7 @@ function render() {
   document.title = tr("title") + " · English Coach";
   get("languages").setAttribute("aria-label", t("app.langLabel"));
   get("admin-link").href = "../?lang=" + lang();
+  get("safety-link").textContent = t("app.safetyEval");
   const select = get("cohort");
   select.replaceChildren(...cohorts.map(id => new Option(tr(id), id, false, id === cohort)));
   get("status").textContent = data ? "" : t(failed ? "benchmark.invalid" : "benchmark.loading");
