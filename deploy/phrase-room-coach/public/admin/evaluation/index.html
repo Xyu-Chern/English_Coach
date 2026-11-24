@@ -1,10 +1,54 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport"
-content="width=device-width,initial-scale=1"><title>English Coach · 100 tasks</title>
-<style>body{font:17px/1.55 system-ui;background:#f4f7fa;color:#1f3042;max-width:920px;
-margin:6vh auto;padding:0 16px}table{border-collapse:collapse;width:100%;background:white}
-th,td{text-align:left;padding:.55em;border-bottom:1px solid #d6e0ea}a{color:#175597}</style>
-<h1>English Coach · 100 tasks</h1><p>Each system answered each task three times.
-The combined counts describe two experiments with different agent policies, models, judges and corpora.
-Compare the two systems within each set.</p>
-<table><tr><th>Set</th><th>System</th><th>Accuracy</th><th>pass@3 · at least once</th><th>pass^3 · all three</th></tr><tr><td>Korean set</td><td>agent</td><td>92.0% (138/150)</td><td>48/50</td><td>43/50</td></tr><tr><td>Korean set</td><td>baseline</td><td>88.7% (133/150)</td><td>48/50</td><td>39/50</td></tr><tr><td>Chinese set</td><td>agent</td><td>60.7% (91/150)</td><td>43/50</td><td>19/50</td></tr><tr><td>Chinese set</td><td>baseline</td><td>64.0% (96/150)</td><td>43/50</td><td>21/50</td></tr><tr><td>Combined</td><td>agent</td><td>76.3% (229/300)</td><td>91/100</td><td>62/100</td></tr><tr><td>Combined</td><td>baseline</td><td>76.3% (229/300)</td><td>91/100</td><td>60/100</td></tr></table><h2>Performance per attempt</h2><table><tr><th>Set</th><th>System</th>
-<th>Mean model calls</th><th>Mean latency (s)</th><th>p95 latency (s)</th><th>Mean tokens</th></tr><tr><td>Korean set</td><td>agent</td><td>3.42</td><td>33.4</td><td>60.5</td><td>58,608</td></tr><tr><td>Korean set</td><td>baseline</td><td>3.25</td><td>26.1</td><td>51.7</td><td>40,332</td></tr><tr><td>Chinese set</td><td>agent</td><td>2.66</td><td>94.4</td><td>251.2</td><td>27,866</td></tr><tr><td>Chinese set</td><td>baseline</td><td>3.33</td><td>105.4</td><td>303.8</td><td>27,884</td></tr><tr><td>Combined</td><td>agent</td><td>3.04</td><td>63.9</td><td>172.1</td><td>43,237</td></tr><tr><td>Combined</td><td>baseline</td><td>3.29</td><td>65.8</td><td>226.5</td><td>34,108</td></tr></table><p><a href="ko.html">Korean set · replay 50 tasks</a><br>Model claude-haiku-5-5 · Judge gpt-5.4-mini-2026-03-17 · Corpus corpus-20261116-full-v2<br>Submission agent can revise previously verified examples.</p><p><a href="zh.html">Chinese set · replay 50 tasks</a><br>Model gpt-6.1-sol · Judge gpt-6.1-sol · Corpus phrase-room-coach<br>Current agent keeps verified examples and can fill remaining slots.</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>200-task evaluation · English Coach</title>
+<link rel="stylesheet" href="../admin.css">
+<link rel="stylesheet" href="benchmark-view.css">
+<script type="module" src="benchmark-view.js"></script>
+</head>
+<body class="benchmark-page"><main>
+  <header>
+    <a class="back" id="admin-link" href="../"><span aria-hidden="true">← </span><span data-copy="admin">English Coach admin</span></a>
+    <div class="seg lang-sw" id="languages" role="group" aria-label="Language"></div>
+  </header>
+  <h1 data-copy="title">200-task evaluation</h1>
+  <p id="coverage" aria-live="polite"></p>
+  <nav class="actions">
+    <a href="report.pdf" data-copy="pdf">English report (PDF)</a>
+    <a href="combined-200.tsv" download data-copy="tsv">Download task results (TSV)</a>
+    <a href="combined-200.json" download data-copy="json">Download full results (JSON)</a>
+  </nav>
+  <section aria-labelledby="compare">
+    <div class="section-top"><h2 id="compare" data-copy="compare">Agent and baseline</h2>
+      <label><span data-copy="scope">Task set</span> <select id="cohort"></select></label>
+    </div>
+    <p class="note" data-copy="provenance">Model, judge, corpus and agent policy varied across cohorts. Compare the systems within each cohort.</p>
+    <p id="status" role="status"></p>
+    <div id="metrics-box" class="box" hidden>
+      <table><thead><tr><th scope="col" data-copy="metric">Measure</th><th scope="col" data-copy="agent">Agent</th><th scope="col" data-copy="baseline">Baseline</th></tr></thead><tbody id="metrics"></tbody></table>
+    </div>
+    <p class="note" data-copy="timeNote">Latency includes waiting during parallel evaluation. Turns count generation calls. Tokens exclude grading and include Codex context for the new tasks.</p>
+  </section>
+  <section aria-labelledby="replays">
+    <h2 id="replays" data-copy="replays">Task replays</h2>
+    <ul id="review-links">
+      <li><a href="expansion.html" data-replay data-copy="newReplay">New 100 · Chinese and Korean</a></li>
+      <li><a href="zh.html" data-replay data-copy="oldZh">Original Chinese 50</a></li>
+      <li><a href="ko.html" data-replay data-copy="oldKo">Original Korean 50</a></li>
+    </ul>
+    <p><a href="expansion.html#zh-ext-hold-door/1" data-replay data-copy="case">Trace a failure · Holding the door, trial 1</a></p>
+  </section>
+  <details id="changes" hidden>
+    <summary id="change-summary"></summary>
+    <p class="note" data-copy="changesNote">P means pass and F means fail. Sequences show trials 1, 2 and 3. Open a task to see both systems’ answers.</p>
+    <div class="box"><table id="changes-table">
+      <thead><tr><th scope="col" data-copy="task">Task</th><th scope="col" data-copy="agent">Agent</th><th scope="col" data-copy="baseline">Baseline</th></tr></thead><tbody></tbody>
+    </table></div>
+  </details>
+  <noscript>JavaScript is required for the interactive tables. The English PDF and the TSV and JSON downloads are available above.</noscript>
+</main></body></html>

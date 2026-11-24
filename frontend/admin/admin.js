@@ -477,6 +477,7 @@ function paintStatic() {
   document.title = t("app.title");
   for (const el of $$("[data-i18n]")) el.textContent = t(el.dataset.i18n);
   for (const el of $$("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
+  $("#evaluationLink").href = "evaluation/?lang=" + lang();
   for (const [id] of TABS) $(`#tab-${id} span`).textContent = t("tab." + id);
   const sw = $("#langSwitch");
   sw.setAttribute("aria-label", t("app.langLabel"));

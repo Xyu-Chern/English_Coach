@@ -1,0 +1,35 @@
+.benchmark-page { color: var(--ink); background: #f6f8fb; }
+.benchmark-page main { max-width: 68rem; padding: 1.3rem clamp(1rem, 4vw, 3rem) 4rem; }
+.benchmark-page header, .benchmark-page .section-top, .benchmark-page .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem 1rem; }
+.benchmark-page header, .benchmark-page .section-top { justify-content: space-between; }
+.benchmark-page h1, .benchmark-page h2 { color: #1c334b; letter-spacing: -.035em; line-height: 1.2; }
+.benchmark-page h1 { margin: 2rem 0 .5rem; font: 600 clamp(1.9rem, 5vw, 3.25rem)/1.12 var(--font-sans); }
+.benchmark-page h2 { margin: 0; font-size: 1.45rem; }
+.benchmark-page p { margin: .55rem 0; }
+.benchmark-page a { color: #245486; text-underline-offset: .18em; }
+.benchmark-page a:hover { color: #143452; }
+.benchmark-page .actions { margin: 1rem 0 0; }
+.benchmark-page section { margin: 2rem 0 0; }
+.benchmark-page .box { margin-top: .8rem; background: white; border: 1px solid #d5dfe8; border-radius: .8rem; overflow-x: auto; }
+.benchmark-page #review-links { display: flex; gap: .65rem 1.2rem; flex-wrap: wrap; padding: 0; list-style: none; }
+.benchmark-page select { max-width: 100%; font: inherit; background: white; color: var(--ink); border: 1px solid #9caebc; border-radius: .5rem; padding: .42rem .55rem; }
+.benchmark-page table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.benchmark-page table th, .benchmark-page table td { padding: .6rem .9rem; text-align: right; border-bottom: 1px solid #e1e7ec; }
+.benchmark-page table th:first-child, .benchmark-page table td:first-child { text-align: left; }
+.benchmark-page table thead th { color: #294d67; background: #e9f1f7; }
+.benchmark-page table tbody th { font-weight: 500; }
+.benchmark-page tr:last-child > * { border-bottom: 0; }
+.benchmark-page .note { color: #43566a; font-size: .92rem; max-width: 78ch; }
+.benchmark-page details { margin-top: .8rem; }
+.benchmark-page summary { color: #245486; font-weight: 600; cursor: pointer; }
+.benchmark-page .sequence { font-family: var(--font-mono); white-space: nowrap; }
+.benchmark-page .sequence.mixed { color: #164a68; font-weight: 700; }
+
+.benchmark-page .back { text-decoration: none; }
+.benchmark-page .back:hover { text-decoration: underline; }
+@media(max-width: 35rem) {
+  .benchmark-page h1 { margin-top: 1.5rem; }
+  .benchmark-page table th, .benchmark-page table td { padding: .5rem .48rem; }
+  .benchmark-page .sequence { font-size: .86rem; }
+  .benchmark-page #changes-table a { overflow-wrap: anywhere; }
+}

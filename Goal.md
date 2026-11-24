@@ -255,7 +255,7 @@ Contracts and decisions D8–D9 are in `design.md`; owner steps are in `frontend
 
 Release checks for the shared site cover staged answers, both replay languages, the blue cat, open live logs with a token-guarded mode switch, and the daily limit.
 
-The Chinese 50-task evaluation is complete. The admin dashboard uses all 300 paired attempts. The report and both cohort replays are available from the dashboard.
+The admin evaluation page covers all 200 tasks and 1,200 graded answers. Each task links to its three paired attempts. The page includes the English PDF and results by cohort.
 
 ## Project Owner Judgment Questions
 
@@ -527,7 +527,7 @@ flowchart LR
 
 共享站发布时检查分阶段回答、中韩文回放、蓝猫互动、无需令牌的真实日志与需令牌的模式切换，以及每日限额。
 
-中文 50 题评测已完成。管理后台使用两种系统的全部 300 次作答，并提供报告和中韩两组回放。
+管理后台评测页收录全部 200 道题和 1,200 份已评分的回答。每道题都可以回放三轮配对作答，并可查阅分组成绩和英文 PDF。
 
 ## 项目负责人判断题
 
@@ -799,7 +799,7 @@ flowchart LR
 
 공용 사이트를 배포할 때 단계별 답변, 한·중 실행 다시보기, 고양이 상호작용, 토큰 없는 실제 로그 조회와 토큰이 필요한 모드 전환, 일일 한도를 확인한다.
 
-중국어 50문항 평가를 완료했습니다. 관리 화면에서 두 시스템의 전체 300회 시도, 보고서 및 두 평가 세트의 리플레이를 확인할 수 있습니다.
+관리 화면의 평가 페이지는 전체 200문항과 채점된 답변 1,200개를 다룹니다. 문항별로 두 시스템의 세 번의 응답을 다시 볼 수 있으며, 평가 세트별 성적과 영문 PDF도 확인할 수 있습니다.
 
 ## 프로젝트 책임자 판단 질문
 

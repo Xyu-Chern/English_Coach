@@ -81,8 +81,8 @@ const pl = (n, one, many = one + "s") => `${n} ${+n === 1 ? one : many}`;
 const plStr = (n, one, many) => `${n} ${String(n) === "1" ? one : many}`, s_ = n => (+n === 1 ? "" : "s"), FINAL = 4;
 const DICT = {
   app: {
-    evalPdf: ["중국어 50문항 평가 보고서 (PDF)", "中文 50 题评测报告（PDF）", "Chinese 50-task report (PDF)"],
-    evalReplay: ["중국어·한국어 평가 비교 및 리플레이", "中韩评测对照与逐题回放", "Chinese and Korean results and replays"],
+    evalPdf: ["200문항 영어 보고서 (PDF)", "200 题英文评测报告（PDF）", "200-task report (PDF, English)"],
+    evalReplay: ["200문항 평가 결과와 리플레이", "200 题评测结果与逐题回放", "200-task results and replays"],
     title: ["English Coach 어드민", "English Coach 管理后台", "English Coach Admin"],
     eyebrow: ["English Coach · 운영", "English Coach · 运营", "English Coach · Operations"],
     concept: ["실제 요청과 평가 실행 기록으로 모드 · 요청 · 지표 · 실행 경로를 살펴봐요", "通过真实请求和评测运行记录，查看模式、请求、指标和执行路径",
@@ -353,7 +353,7 @@ const DICT = {
     answers: ["최종 답", "最终回答", "Final answer"], answersSub: ["슬롯 순서", "按槽位顺序", "slot order"],
   },
   benchmark: {
-    title: ["벤치마크 및 안전성", "基准与安全性", "Benchmark and safety"],
+    title: ["기존 중국어 50문항 평가 및 안전성 테스트", "原中文 50 题评测与安全测试", "Original Chinese 50 and safety tests"],
     metric: ["지표", "指标", "Metric"],
     loading: ["벤치마크 성과를 불러오는 중이에요…", "正在加载基准结果…", "Loading benchmark results…"],
     missing: ["배포된 벤치마크 결과가 아직 없어요.", "暂未部署基准结果。", "Benchmark results have yet to be deployed."],
