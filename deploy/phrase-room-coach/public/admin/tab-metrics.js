@@ -5,13 +5,16 @@ import {
   lockWord, modeBadge, nEq, nr, onSeg, pct, phead, popNote, rerender, retryTraces, rootPx, runBar, sec, secU, seg,
   sv, syncSeg, usd, warnErr,
 } from "./admin.js";
-import { t, tx } from "./i18n.js";
+import { fmtNum, t, tx } from "./i18n.js";
+import { openGraph } from "./tab-graph.js";
 const T = (k, p) => t("metrics." + k, p), TX = (k, p) => tx("metrics." + k, p);
 const tickSec = v => t("unit.sec", { n: fmtN(v) });
 let MD = null; /* 모드별 묶음 + 첫 단계 토큰(ftok, trace 필요) */
 let trend = "time"; /* 회차별 비교: time | tok */
 export async function render(panel) {
-  fill(panel, h("p.loading", T("loading")));
+  const benchmark = h("section.card.benchmark", h("p.loading", t("benchmark.loading")));
+  fill(panel, benchmark, h("p.loading", T("loading")));
+  const scorecard = renderBenchmark(benchmark);
   let tErr = null;
   await getTraces().catch(e => (tErr = e));
   MD = Object.fromEntries(MODES.map(m => [m, { ...ST[m], ftok: tErr ? [] : ST[m].ok.map(r => firstTok(r.id)) }]));
@@ -19,7 +22,7 @@ export async function render(panel) {
   const split = k => ({ b: fmtN(MD.baseline[k].length), a: fmtN(MD.agent[k].length) });
   const card = (cls, id, ic, title, ...body) =>
     h("section.card." + cls, { "aria-labelledby": id }, h("h3", { id }, icon(ic), ...title), ...body);
-  fill(panel,
+  fill(panel, benchmark,
     phead(T("title"), T("lead")),
     runBar(),
     tErr && warnErr(tErr, () => (retryTraces(), rerender("metrics")), T("traceFail")),
@@ -44,10 +47,100 @@ export async function render(panel) {
     syncSeg($("#mf-trend"), x => x === trend);
     drawTrend();
   });
+  await scorecard;
 }
 export function dyn() {
   drawBox(); drawTrend();
 }
+
+const B = (key, params) => t("benchmark." + key, params);
+const SCORE_ROWS = ["accuracy", "pass3", "pass_at3", "model_calls", "tokens", "attack_success", "over_refusal"];
+let benchmarkPromise;
+
+async function fetchBenchmark() {
+  const response = await fetch("benchmark.json", { cache: "no-cache" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("benchmark.json");
+  const data = await response.json();
+  if (data?.schema_version !== 1 || typeof data.run?.id !== "string" ||
+      !MODES.every(mode => SCORE_ROWS.every(key => data.systems?.[mode]?.[key]))) {
+    throw new Error("benchmark.json");
+  }
+  return data;
+}
+
+function scoreValue(key, value) {
+  const share = (n, total) => [h("strong", pct(n, total) + "%"), h("small", `${fmtN(n)} / ${fmtN(total)}`)];
+  if (key === "model_calls" || key === "tokens") {
+    const digits = key === "model_calls" ? 2 : 0;
+    const shown = fmtNum(value.mean, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    return [h("strong", shown), h("small", nEq(value.n))];
+  }
+  if (key === "attack_success" || key === "over_refusal") {
+    if (!value.expected || value.judged < value.expected) {
+      return [h("span.muted", B("pending")), value.expected > 0 && h("small", B("judged", {
+        n: fmtN(value.judged), total: fmtN(value.expected),
+      }))];
+    }
+    return share(value.events, value.expected);
+  }
+  return share(value.passed, value.n);
+}
+
+function benchmarkTable(data) {
+  const { run, systems } = data;
+  return [
+    h("p.benchmark-run", B("run", { id: run.id, tasks: fmtN(run.tasks), repeats: fmtN(run.repeats) }),
+      data.safety_prompts > 0 && [" · ", B("safetyScope", { attacks: fmtN(data.attack_prompts),
+        total: fmtN(data.safety_prompts) })]),
+    h("table.benchmark-table", { "aria-label": B("title") },
+      h("thead", h("tr", h("th", { scope: "col" }, B("metric")), MODES.map(m => h("th", { scope: "col" }, modeBadge(m))))),
+      h("tbody", SCORE_ROWS.map(key => h("tr", h("th", { scope: "row" }, B(key)),
+        MODES.map(m => h("td.num." + m, scoreValue(key, systems[m][key]))))))),
+    foot(B("method")),
+  ];
+}
+
+function benchmarkFailure(data) {
+  const f = data.failure;
+  if (!f) return null;
+  const request = data.run.id === D.meta.run.id && D.requests.find(r =>
+    r.task_id === f.task_id && r.mode === f.variant && r.attempt === f.attempt);
+  const fact = f.status === "error" ? B("failureError", { code: f.error_code || "—" })
+    : f.status === "declined" ? B("failureDeclined")
+      : f.expect === "answer" ? B("failureAnswer", {
+        first: fmtN(f.verified_first), final: fmtN(f.verified_final), good: fmtN(f.grounded_good),
+      }) : B("failureGrade");
+  return h("div.benchmark-failure",
+    h("h4", B("failure")),
+    h("p.mono", [f.task_id, f.variant, f.attempt].join(" / ")),
+    h("p", fact),
+    request && h("button.btn.sm", { type: "button", on: { click: () => openGraph(request.id) } }, B("trace")));
+}
+
+async function renderBenchmark(host) {
+  try {
+    const data = await (benchmarkPromise ??= fetchBenchmark());
+    if (!data) {
+      fill(host, h("h3", icon("chart"), B("title")), foot(B("missing")));
+      return;
+    }
+    const dialog = h("dialog.card.benchmark-dialog", { "aria-label": B("title") },
+      h("div.benchmark-head", h("h3", B("title")),
+        h("button.btn.sm", { type: "button", autofocus: true, on: { click: () => dialog.close() } }, B("close"))),
+      benchmarkTable(data));
+    fill(host, h("div.benchmark-head", h("h3", icon("chart"), B("title")),
+      h("button.btn.sm", { type: "button", on: { click: () => dialog.showModal() } }, B("present"))),
+    benchmarkTable(data),
+    foot([data.run.model, data.run.corpus, data.run.judge_protocol,
+      data.run.judge_votes && B("votes", { n: fmtN(data.run.judge_votes) })].filter(Boolean).join(" · ")),
+    benchmarkFailure(data), dialog);
+  } catch {
+    benchmarkPromise = null;
+    fill(host, h("h3", icon("chart"), B("title")), h("p.foot", { role: "status" }, B("invalid")));
+  }
+}
+
 function kpis() {
   const both = ["agent", "baseline"], at = (a, q, f) => { const v = nr(a, q); return v == null ? "—" : f(v); };
   const per = f => both.map(m => `${m} ${f(MD[m])}`).join(" · "), v3 = MD.agent.v3ran.length;

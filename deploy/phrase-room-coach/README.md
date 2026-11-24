@@ -12,6 +12,38 @@ vercel link --project phrase-room-coach   # once, from the account that owns the
 vercel --prod
 ```
 
+### Publish a new benchmark scorecard
+
+Start in the repository root after the baseline and Agent have each completed and graded three runs per task. Replace `team-200` with the eval run folder name. If this checkout is new to the Vercel project, link it once using the command above.
+
+The first command updates the checkout, the Python command writes `public/admin/benchmark.json` into this deployment package, and the last command deploys that file. Open `/admin/?tab=metrics` and verify the run ID and counts. The scorecard uses a separate static file so the request log and timing views can still identify their detailed evaluation run. The export uses the existing eval Python environment and makes no model calls.
+
+The second example below is the **input** safety file. List all safety prompts, using `kind: "benign"` for normal controls. `safe` or `unsafe` is the outcome against each prompt's criterion. Use `null` for missing judgments. Over-refusal is measured on answer-expected benchmark attempts. Use `over_refusals` to label explicit declines (`true` for wrongful, `false` for justified). An omitted decline stays unjudged. The optional `failure` key selects a failed attempt in the same run. Substitute IDs from your run. If the safety file is still pending, omit `--safety` and the unjudged cells show **Pending**. Review the generated public scorecard before deploying.
+
+```sh
+git pull --ff-only
+python -m evaluation.export_benchmark --run team-200 --safety evaluation/results/team-200/safety-results.json
+cd deploy/phrase-room-coach
+vercel --prod
+```
+
+```json
+{
+  "run": "team-200",
+  "prompts": [
+    {
+      "id": "s-001",
+      "kind": "attack",
+      "surface": "question",
+      "criterion": "Stay within the coach's permitted scope.",
+      "verdicts": {"baseline": "safe", "agent": null}
+    }
+  ],
+  "over_refusals": {"task-id/agent/2": true},
+  "failure": "task-id/agent/2"
+}
+```
+
 **What changes for learners:** the coach searches all 36,397 approved Changelog passages (1,167 episodes, CC-BY-SA-4.0) instead of 185 passages from six episodes. Everyday questions such as "이제 자러 가고 싶다고 뭐라 말해?" can now find a podcast quote. The admin request log opens without a token; the mode switch still needs `COACH_ADMIN_TOKEN`.
 
 **Contents**
@@ -44,6 +76,38 @@ vercel link --project phrase-room-coach   # 只需一次，用拥有该项目的
 vercel --prod
 ```
 
+### 发布新的基准成绩表
+
+Baseline 和 Agent 对每题均完成三次运行并评分后，从仓库根目录开始。将 `team-200` 替换为评估运行目录名。若当前检出尚未关联 Vercel 项目，先用上面的命令关联一次。
+
+第一条命令更新检出，Python 命令把 `public/admin/benchmark.json` 写入此部署包，最后一条命令发布该文件。打开 `/admin/?tab=metrics` 核对运行 ID 和计数。成绩表使用单独的静态文件，请求日志和耗时视图仍显示各自详细评估的运行 ID。导出复用现有 eval 的 Python 环境，无需调用模型。
+
+下面第二个示例是安全评估**输入**文件。列出所有提示，正常对照的 `kind` 填 `"benign"`。按照每个提示的标准将实际结果标记为 `safe` 或 `unsafe`，未判定填 `null`。过度拒绝以预期应答的基准运行计，用 `over_refusals` 给明确拒绝标注（`true` 为不当，`false` 为合理）。省略的拒绝仍视为未判定。可选的 `failure` 指向同一运行中一次失败。请替换成实际 ID。安全文件尚未准备好时可省略 `--safety`，未判定指标会显示**待确认**。部署前检查公开成绩表。
+
+```sh
+git pull --ff-only
+python -m evaluation.export_benchmark --run team-200 --safety evaluation/results/team-200/safety-results.json
+cd deploy/phrase-room-coach
+vercel --prod
+```
+
+```json
+{
+  "run": "team-200",
+  "prompts": [
+    {
+      "id": "s-001",
+      "kind": "attack",
+      "surface": "question",
+      "criterion": "Stay within the coach's permitted scope.",
+      "verdicts": {"baseline": "safe", "agent": null}
+    }
+  ],
+  "over_refusals": {"task-id/agent/2": true},
+  "failure": "task-id/agent/2"
+}
+```
+
 **对学习者的变化：** 教练检索全部已核准的 36,397 段 Changelog 字幕（1,167 集，CC-BY-SA-4.0），而不再只有六集的 185 段。像"이제 자러 가고 싶다고 뭐라 말해?"这样的日常问题也能找到播客原句。管理页的真实请求日志无需令牌即可查看；切换模式仍然需要 `COACH_ADMIN_TOKEN`。
 
 **内容**
@@ -74,6 +138,38 @@ vercel --prod
 cd deploy/phrase-room-coach
 vercel link --project phrase-room-coach   # 처음 한 번, 프로젝트를 가진 계정으로
 vercel --prod
+```
+
+### 새 벤치마크 성과표 배포
+
+Baseline과 Agent가 각 과제를 3회씩 실행하고 채점을 마치면 저장소 루트에서 시작한다. `team-200`을 실제 eval 결과 폴더 이름으로 바꾼다. 이 체크아웃을 Vercel 프로젝트에 처음 연결한다면 위의 연결 명령을 한 번 실행한다.
+
+첫 명령은 체크아웃을 갱신한다. Python 명령이 배포 패키지에 `public/admin/benchmark.json`을 쓰고, 마지막 명령이 그 파일을 배포한다. `/admin/?tab=metrics`에서 평가 실행 ID와 건수를 확인한다. 성과표는 별도 정적 파일을 읽고, 요청 로그와 지연 지표는 상세 데이터에 해당하는 실행 ID를 보여준다. 기존 eval Python 환경에서 내보내며 모델을 호출하지 않는다.
+
+아래 두 번째 예시는 안전 평가 **입력** 파일이다. 모든 안전 프롬프트를 넣고 정상 대조군은 `kind: "benign"`으로 표시한다. 케이스별 기준에 따라 결과를 `safe` 또는 `unsafe`로 판정하고, 미판정은 `null`로 남긴다. 과잉 거절률은 답변이 기대된 벤치마크 실행 기준이다. `over_refusals`에는 명시적 거절의 판정을 담는다(`true` 부당, `false` 정당). 키가 빠진 거절은 미판정으로 남는다. 선택 사항인 `failure`에는 같은 평가 실행의 실패 키를 쓴다. 실제 실행 ID와 과제 ID로 바꿔 사용한다. 안전 파일이 준비 중이면 `--safety`를 생략할 수 있고, 미판정 지표는 **확인 대기**로 표시된다. 배포 전에 생성된 공개 성과표를 확인한다.
+
+```sh
+git pull --ff-only
+python -m evaluation.export_benchmark --run team-200 --safety evaluation/results/team-200/safety-results.json
+cd deploy/phrase-room-coach
+vercel --prod
+```
+
+```json
+{
+  "run": "team-200",
+  "prompts": [
+    {
+      "id": "s-001",
+      "kind": "attack",
+      "surface": "question",
+      "criterion": "Stay within the coach's permitted scope.",
+      "verdicts": {"baseline": "safe", "agent": null}
+    }
+  ],
+  "over_refusals": {"task-id/agent/2": true},
+  "failure": "task-id/agent/2"
+}
 ```
 
 **학습자에게 달라지는 점:** 코치가 에피소드 6개의 자막 185개 대신 승인된 Changelog 자막 36,397개 전체(에피소드 1,167개, CC-BY-SA-4.0)를 검색한다. "이제 자러 가고 싶다고 뭐라 말해?" 같은 일상 질문도 팟캐스트 원문을 찾을 수 있다. 어드민의 실제 요청 기록은 토큰 없이 열리고, 모드 전환에는 여전히 `COACH_ADMIN_TOKEN`이 필요하다.

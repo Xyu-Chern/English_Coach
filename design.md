@@ -317,6 +317,12 @@ In the submission run's 129 normal answers, the first stage verified all three s
 - **Serving:** Vercel serves the page and its data as static files under `public/admin/`. Because the page reads its data by relative URL, `/admin` redirects to `/admin/`. The local server serves the same paths. Every `/admin` response carries `X-Robots-Tag: noindex`. `COACH_ADMIN_DIR` and `COACH_ADMIN_DATA` swap the page and data folders, so another design or run can be checked on its own port. Commands and packaging options are in `frontend/README.md`.
 - **Data builder safety:** `frontend/admin_data.py` keeps only allowlisted fields of each trace step (an unknown step keeps only its error code) and scans what it would write for secret-like values (API keys, tokens, PEM blocks, database URLs with a password) and local home paths. A hit stops the build, and nothing is written.
 
+#### Benchmark scorecard
+
+The Metrics tab reads a separate static `benchmark.json` (schema v1) from the shared Vercel package. It shows the paired run ID, task and safety coverage, accuracy, pass³, pass@3, average model calls and chat tokens, attack success, over-refusal, and one recorded failure when available. Presentation view enlarges the table. Timing distributions below it still identify their own evaluation run.
+
+Export validates three graded attempts per task per system against the run manifest. The safety file supplies per-prompt judgments and adjudication of explicit declines on answer-expected benchmark requests. Unjudged safety outcomes are shown as pending. The static file contains counts, provenance, and a bounded failure summary. The teammate exports into the existing package and deploys it using the instructions in `deploy/phrase-room-coach/README.md`.
+
 #### Admin API (D4, D5)
 
 | Request | Reply |
@@ -736,6 +742,12 @@ D1–D6 于 2026-11-21 确定。2026-11-22 修订了 D5、完成了 D6，并新�
 - **提供方式：** Vercel 把页面和数据作为 `public/admin/` 下的静态文件提供。页面按相对路径读取数据，所以 `/admin` 会重定向到 `/admin/`。本地服务提供相同路径。所有 `/admin` 响应都带 `X-Robots-Tag: noindex`。`COACH_ADMIN_DIR` 和 `COACH_ADMIN_DATA` 可替换页面和数据文件夹，因此其他设计稿或运行也能在各自端口上检查。命令和打包选项见 `frontend/README.md`。
 - **数据生成的安全措施：** `frontend/admin_data.py` 对每个 trace 步骤只保留允许列表中的字段（未知步骤只保留错误码），并在写入前扫描内容中类似密钥的值（API 密钥、令牌、PEM 块、带密码的数据库 URL）和本机 home 路径。一旦命中就停止生成，什么都不写入。
 
+#### 基准成绩表
+
+指标页读取共享 Vercel 包中单独的静态 `benchmark.json`（格式 v1）。它显示配对运行 ID、题目和安全评估覆盖量、准确率、pass³、pass@3、平均模型调用次数和聊天 token、攻击成功率、过度拒绝率，以及可用时的一次实际失败。演示视图放大表格。下方的耗时分布标明自己的评估运行。
+
+导出时根据运行清单校验每题每个系统恰有三次已评分记录。安全文件提供逐提示判定以及对预期应答但明确拒绝的基准运行的复核。未完成判定的安全指标显示待确认。静态文件只含计数、来源信息及有限的失败摘要。队友按 `deploy/phrase-room-coach/README.md` 将结果导出到现有部署包并发布。
+
 #### 管理页 API（D4、D5）
 
 | 请求 | 回复 |
@@ -1154,6 +1166,12 @@ D1–D6은 2026-11-21에 확정했다. 2026-11-22에 D5를 개정하고 D6을 �
 - **언어:** 머리말에서 한국어, 중국어, 영어로 바꿀 수 있고, `?lang=`으로 링크에 언어를 지정할 수 있다. 기본은 한국어다.
 - **제공 방식:** Vercel은 화면과 데이터를 `public/admin/`의 정적 파일로 제공한다. 화면이 데이터를 상대 경로로 읽으므로 `/admin`은 `/admin/`으로 이동한다. 로컬 서버도 같은 경로를 제공한다. 모든 `/admin` 응답에는 `X-Robots-Tag: noindex`가 붙는다. `COACH_ADMIN_DIR`과 `COACH_ADMIN_DATA`로 화면 폴더와 데이터 폴더를 바꿀 수 있어, 다른 시안이나 실행도 다른 포트에서 확인할 수 있다. 명령과 패키징 옵션은 `frontend/README.md`에 있다.
 - **데이터 생성기 안전장치:** `frontend/admin_data.py`는 trace 단계마다 허용 목록에 있는 필드만 남기고(모르는 단계는 오류 코드만), 쓰기 전에 내용에서 비밀처럼 보이는 값(API 키, 토큰, PEM 블록, 비밀번호가 든 데이터베이스 URL)과 로컬 홈 경로를 찾는다. 하나라도 나오면 빌드를 멈추고 아무것도 쓰지 않는다.
+
+#### 벤치마크 성과표
+
+지표 탭은 공용 Vercel 패키지의 별도 정적 파일 `benchmark.json`(형식 v1)을 읽는다. 두 시스템의 평가 실행 ID, 과제·안전 평가 범위, 정확도, pass³, pass@3, 평균 모델 호출 및 채팅 토큰, 공격 성공률, 과잉 거절률과 기록된 실패가 있으면 한 건을 표시한다. 발표 화면에서 표를 확대할 수 있다. 아래 지연 분포에는 해당 데이터의 평가 실행을 따로 명시한다.
+
+내보내기는 실행 매니페스트와 대조해 과제당 시스템별 채점 기록이 3회인지 확인한다. 안전 파일에는 프롬프트별 판정 및 정상 답변이 기대된 평가 요청을 명시적으로 거절한 경우의 검토 결과를 담는다. 판정이 덜 끝난 안전 지표는 확인 대기로 표시한다. 정적 파일에 건수, 출처 정보, 제한된 실패 요약을 담는다. 팀원은 `deploy/phrase-room-coach/README.md`에 따라 기존 패키지에 결과를 내보내고 배포한다.
 
 #### 어드민 API(D4, D5)
 

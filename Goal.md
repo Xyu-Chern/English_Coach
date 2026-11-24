@@ -196,6 +196,11 @@ Scope, contracts and known gaps are in `design.md` (Learner clients). G6 made th
 
 **D6 result (2026-11-22):** the lock held (0 requests lost a first-stage verified example; all 93 fully verified requests skipped the continuation), but the locked agent no longer beats the baseline: pass 85.3% for both, strict 54.0% vs 55.3% (−1.6 pp, 95% CI −6.2 to +2.3). Actual cost $3.63. The full figures are in `design.md` (Re-evaluation (D6)), and the open question on the deployed default is R1 there.
 
+### Benchmark scorecard deployment
+
+- Code verified. Exported an existing 50-task run and checked the shared package in the browser with a 200-task, 50-prompt fixture.
+- The teammate deploys the actual run after evaluation. See `design.md`.
+
 ### Request log and mode switch (D5 update, 2026-11-22)
 
 Contracts and known gaps are in `design.md` (Mode and request log, Admin API). The owner's Neon setup is in `frontend/README.md`. No paid calls.
@@ -463,6 +468,11 @@ flowchart LR
 
 **D6 结果（2026-11-22）：** 锁定生效（丢失第一阶段核对通过例句的请求为 0；93 个全部核对通过的请求都跳过了后续阶段），但加锁的 agent 不再优于 baseline：通过率都是 85.3%，严格通过率 54.0% 对 55.3%（−1.6 个百分点，95% 置信区间 −6.2 至 +2.3）。实际费用 3.63 美元。完整数据见 `design.md`（重新评估（D6）），关于部署默认值的待决问题是其中的 R1。
 
+### 基准成绩表部署
+
+- 代码已验证。导出了现有 50 题运行，并在浏览器中用 200 题和 50 条安全提示的测试数据验证共享包。
+- 队友在评估完成后部署实际结果。见 `design.md`。
+
 ### 请求日志与模式切换（D5 更新，2026-11-22）
 
 契约和已知差距见 `design.md`（模式与请求日志、管理页 API）。项目负责人的 Neon 设置见 `frontend/README.md`。没有付费调用。
@@ -729,6 +739,11 @@ flowchart LR
 | G8 | 출시: 커밋, D6 데이터로 패키징, APK 재빌드, 배포, 이어서 Vercel과 Android의 스트리밍·`/admin`·로그 줄·저장된 행·일일 카운트·모드 전환 확인 | G3, G5, G6, G9–G11, G13, L6, A1–A6, P1–P4 | 시작 전 | 판단 질문 1, G13, P4가 필요 |
 
 **D6 결과(2026-11-22):** 잠금은 동작했다(첫 단계 검증 예문을 잃은 요청 0건, 모두 검증된 요청 93건 전부 후속 생략). 그러나 잠금 agent는 더 이상 baseline보다 낫지 않다. 통과율은 둘 다 85.3%, strict는 54.0% 대 55.3%다(−1.6%p, 95% CI −6.2 ~ +2.3). 실제 비용은 $3.63이다. 전체 수치는 `design.md`의 재평가(D6)에 있고, 배포 기본값에 대한 질문은 그곳의 R1이다.
+
+### 벤치마크 성과표 배포
+
+- 코드 검증 완료. 기존 50개 과제 실행을 내보냈고, 200개 과제·안전 프롬프트 50개 테스트 결과를 공용 배포 패키지의 브라우저 화면에서 확인했다.
+- 평가를 마친 팀원이 실제 결과를 배포한다. `design.md`를 참조한다.
 
 ### 요청 로그와 모드 전환(D5 갱신, 2026-11-22)
 

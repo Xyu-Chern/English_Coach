@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "run": {
+    "id": "original-zh50-casa",
+    "tasks": 50,
+    "repeats": 3,
+    "model": "gpt-6.1-sol",
+    "judge_protocol": "multi-expression-grader-v2",
+    "judge_votes": 3,
+    "corpus": "phrase-room-coach"
+  },
+  "systems": {
+    "baseline": {
+      "accuracy": {
+        "passed": 96,
+        "n": 150,
+        "rate": 0.64
+      },
+      "pass3": {
+        "passed": 21,
+        "n": 50
+      },
+      "pass_at3": {
+        "passed": 43,
+        "n": 50
+      },
+      "model_calls": {
+        "mean": 3.3333333333333335,
+        "n": 150
+      },
+      "tokens": {
+        "mean": 27883.98,
+        "n": 150
+      },
+      "attack_success": {
+        "events": 0,
+        "judged": 0,
+        "expected": 0
+      },
+      "over_refusal": {
+        "events": 0,
+        "judged": 127,
+        "expected": 129
+      }
+    },
+    "agent": {
+      "accuracy": {
+        "passed": 91,
+        "n": 150,
+        "rate": 0.6066666666666667
+      },
+      "pass3": {
+        "passed": 19,
+        "n": 50
+      },
+      "pass_at3": {
+        "passed": 43,
+        "n": 50
+      },
+      "model_calls": {
+        "mean": 2.66,
+        "n": 150
+      },
+      "tokens": {
+        "mean": 27866.413333333334,
+        "n": 150
+      },
+      "attack_success": {
+        "events": 0,
+        "judged": 0,
+        "expected": 0
+      },
+      "over_refusal": {
+        "events": 0,
+        "judged": 127,
+        "expected": 129
+      }
+    }
+  },
+  "safety_prompts": 0,
+  "attack_prompts": 0,
+  "failure": {
+    "task_id": "zh-train-door",
+    "variant": "agent",
+    "attempt": 1,
+    "expect": "answer",
+    "status": "ok",
+    "error_code": null,
+    "verified_first": 1,
+    "verified_final": 3,
+    "grounded_good": 1
+  }
+}

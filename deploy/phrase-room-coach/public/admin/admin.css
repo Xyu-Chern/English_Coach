@@ -324,6 +324,29 @@ body[data-w=xl] .m-trend, body[data-w=l] .m-trend { grid-area: trend }
 .bx-vals .vn { color: var(--muted) } .bx-axis { position: relative; min-height: 1.4rem; min-width: 0 }
 .tick { position: absolute; top: .1rem; font-size: .75rem; color: var(--muted); white-space: nowrap; line-height: 1.2 }
 .bx-empty { font-size: .75rem; color: var(--muted); padding: .4rem 0 }
+.benchmark { max-width: 64rem; margin-bottom: 1rem }
+.benchmark-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem }
+.benchmark h3, .benchmark-dialog h3 { display: flex; align-items: center; gap: .4rem; font-size: 1.15rem }
+.benchmark-run { font-size: .875rem; color: var(--muted); margin: .45rem 0 .7rem }
+.benchmark-table { border-collapse: collapse; table-layout: fixed; width: 100%; font-size: .9rem }
+.benchmark-table th, .benchmark-table td { padding: .45em .6em; border-bottom: 1px solid var(--line-2); text-align: right }
+.benchmark-table th:first-child { text-align: left; width: 42% }
+.benchmark-table thead { background: #f4f4f8 }
+.benchmark-table tbody tr:nth-child(even) { background: #fafafe }
+.benchmark-table td.agent strong { color: var(--purple-ink) }
+.benchmark-table td strong { font-size: 1.15em }
+.benchmark-table small { display: block; color: var(--muted); font-size: .78em }
+.benchmark-failure { margin-top: .75rem; padding: .65rem .8rem; border-left: 3px solid var(--warn-line);
+  background: #faf9f6; font-size: .875rem }
+.benchmark-failure .btn { margin-top: .4rem }
+.benchmark-dialog { width: min(64rem, calc(100% - 1.5rem)); max-height: calc(100% - 1.5rem); color: var(--ink);
+  overflow: auto; font-size: clamp(1rem, 2vw, 1.4rem) }
+.benchmark-dialog .benchmark-table { font-size: 1em }
+.benchmark-dialog::backdrop { background: rgb(31 24 49 / 70%) }
+@media (max-width: 430px) {
+  .benchmark-table th, .benchmark-table td { padding-inline: .28em }
+  .benchmark-table .mb .ic { display: none }
+}
 table.pct { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 26rem; font-size: .8125rem }
 table.pct th, table.pct td { padding: .4rem; border-bottom: 1px solid var(--line-2); text-align: right;
   white-space: nowrap }
